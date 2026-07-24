@@ -48,7 +48,9 @@ model User {
 // in application logic before the row is removed).
 model GoogleCredential {
   id                    String    @id @default(cuid())
-  userId                String
+  // One Drive connection per user → upsert by userId is idempotent (reconnecting
+  // updates the row, never creates a duplicate).
+  userId                String    @unique
   encryptedRefreshToken String
   scopes                String[]
   connectedAt           DateTime  @default(now()) @db.Timestamptz(3)

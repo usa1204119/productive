@@ -4,7 +4,13 @@ import { env } from "../env.js";
 import { AppError } from "../errors.js";
 import { logger } from "../logger.js";
 import { requireAuth } from "../middleware/auth.js";
-import { buildSignInUrl, exchangeSignInCode } from "../lib/google.js";
+import {
+  buildDriveConsentUrl,
+  buildSignInUrl,
+  exchangeDriveCode,
+  exchangeSignInCode,
+} from "../lib/google.js";
+import { connectDrive, disconnectDrive } from "../lib/driveCredentials.js";
 import { convertGuestToGoogle } from "../lib/conversion.js";
 import { beginOAuth, consumeOAuth } from "../lib/oauthState.js";
 import { ok } from "../lib/respond.js";
@@ -67,6 +73,59 @@ authRouter.get("/google/link", requireAuth, (req, res, next) => {
   }
 });
 
+/** Start incremental Drive authorization (real Google users only). */
+authRouter.get("/google/drive", requireAuth, (req, res, next) => {
+  try {
+    if (req.user!.isGuest) {
+      throw new AppError(403, "GUEST_FORBIDDEN", "Sign in with Google to use Documents");
+    }
+    const nonce = beginOAuth(res, "drive");
+    res.redirect(buildDriveConsentUrl(nonce));
+  } catch (err) {
+    next(err);
+  }
+});
+
+/** Complete Drive authorization without creating folders yet (lazy on upload). */
+authRouter.get("/google/drive/callback", requireAuth, async (req, res) => {
+  const redirectOk = () => res.redirect(`${env.WEB_URL}/?drive=connected`);
+  const redirectErr = (code: string) =>
+    res.redirect(`${env.WEB_URL}/?drive=error&code=${encodeURIComponent(code)}`);
+
+  try {
+    const state = typeof req.query.state === "string" ? req.query.state : "";
+    const intent = consumeOAuth(req, res, state);
+    if (intent !== "drive") throw new AppError(400, "OAUTH_ERROR", "Invalid OAuth intent");
+    if (req.query.error) return redirectErr("OAUTH_DENIED");
+
+    const code = typeof req.query.code === "string" ? req.query.code : null;
+    if (!code) return redirectErr("OAUTH_ERROR");
+    const tokens = await exchangeDriveCode(code);
+    await connectDrive(prisma, req.user!.id, tokens);
+    return redirectOk();
+  } catch (err) {
+    if (err instanceof AppError) {
+      logger.warn({ code: err.code }, "Drive OAuth callback failed");
+      return redirectErr(err.code);
+    }
+    logger.error({ err }, "Drive OAuth callback unexpected error");
+    return redirectErr("OAUTH_ERROR");
+  }
+});
+
+/** Explicitly revoke and remove the stored Drive credential. */
+authRouter.post("/google/drive/disconnect", requireAuth, async (req, res, next) => {
+  try {
+    if (req.user!.isGuest) {
+      throw new AppError(403, "GUEST_FORBIDDEN", "Guests do not have a Drive connection");
+    }
+    await disconnectDrive(prisma, req.user!.id);
+    ok(res, { connected: false });
+  } catch (err) {
+    next(err);
+  }
+});
+
 /** Single OAuth callback for both sign-in and guest conversion. */
 authRouter.get("/google/callback", async (req, res) => {
   const redirectOk = () => res.redirect(`${env.WEB_URL}/?auth=success`);
@@ -76,10 +135,11 @@ authRouter.get("/google/callback", async (req, res) => {
   try {
     const code = typeof req.query.code === "string" ? req.query.code : null;
     const state = typeof req.query.state === "string" ? req.query.state : "";
+    const intent = consumeOAuth(req, res, state);
+    if (intent === "drive") throw new AppError(400, "OAUTH_ERROR", "Invalid OAuth intent");
     if (req.query.error) return redirectErr("OAUTH_DENIED");
     if (!code) return redirectErr("OAUTH_ERROR");
 
-    const intent = consumeOAuth(req, res, state);
     const identity = await exchangeSignInCode(code);
 
     if (intent === "link") {

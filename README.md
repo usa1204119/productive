@@ -25,7 +25,9 @@ packages/
    node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
    ```
    Create a Google Cloud OAuth 2.0 **Web application** client and register the
-   redirect URIs from `.env.example`. Sign-in requests only `openid email profile`.
+   redirect URIs from `.env.example`, enable the Google Drive API, and keep both
+   OAuth flows on the same Web client. Sign-in requests only `openid email profile`;
+   Drive is requested separately and only as `drive.file`.
 3. Create the database schema:
    ```
    npm run prisma:migrate --workspace apps/server
@@ -101,10 +103,46 @@ remembered per workspace), a keyboard-first **add** input (Enter creates, keeps
 focus), and a right-hand side panel (Escape closes). The "View on board"
 back-link passes only IDs — the Tasks module has no Excalidraw awareness.
 
+## Google Drive / Documents (Step 6)
+
+Drive permission is incremental: opening Documents explains the access first,
+and the user explicitly connects it. Identity sign-in never requests a Drive
+scope. The Drive OAuth URL is regression-tested to request exactly:
+
+```
+https://www.googleapis.com/auth/drive.file
+```
+
+Refresh tokens are encrypted with AES-256-GCM and `ENCRYPTION_KEY`. The Google
+client refreshes access tokens automatically; `invalid_grant` marks the
+connection disconnected and returns a reconnect state instead of a raw error.
+Folders are lazy: no Drive folder is created during sign-in or consent. The first
+successful upload creates `Plane and Curves` plus the workspace subfolder.
+Drive `appProperties`, stored IDs, and a single-flight lock make creation
+idempotent and recover a folder that was deleted directly in Drive.
+
+- `GET  /auth/google/drive` — begin incremental Drive consent.
+- `GET  /auth/google/drive/callback` — exchange and encrypt the refresh token.
+- `POST /auth/google/drive/disconnect` — revoke and remove the credential.
+- `GET  /workspaces/:workspaceId/documents` — list records and flag Drive-deleted
+  files as `missing`.
+- `POST /workspaces/:workspaceId/documents` — stream one raw file (100 MB max).
+- `GET  /workspaces/:workspaceId/documents/uploads/:uploadId/events` — ordered
+  server-to-Drive upload progress (SSE).
+- `PATCH /workspaces/:workspaceId/documents/:documentId` — attach/detach a task.
+- `DELETE /workspaces/:workspaceId/documents/:documentId` — remove the record;
+  `?deleteFromDrive=true` is a separate explicit opt-in.
+
+Files are streamed through the API and never stored in the database. Files at
+least 5 MB use Drive's resumable protocol in 8 MiB chunks (a valid 256 KiB
+multiple), with retry/status recovery for transient failures. A database record
+is created only after Drive completes; failed/cancelled uploads leave no partial
+row, and a failed database write triggers compensating Drive cleanup.
+
 ### DB smoke tests
 
 ```
-npm run smoke --workspace apps/server    # auth + workspaces
+npm run smoke --workspace apps/server
 ```
 
 Runs the real code paths against an in-process PGlite database (Postgres
@@ -119,6 +157,9 @@ compiled to WASM) — no server or Docker needed:
   verbatim (unknown fields preserved), and delete clears task back-links.
 - `smoke:tasks` — append ordering, insert-average, rebalance below 0.0001,
   completedAt transitions, delete-detaches-documents, and scoping.
+- `smoke:documents` — exact OAuth scope, encrypted/upserted credentials,
+  invalid-token reconnect state, folder idempotency/recovery, missing files,
+  cancellation cleanup, progress ordering, and multi-chunk resumable upload.
 - `smoke:qa` — name validation, Unicode round-trip, and concurrent deletion.
 
 The autosave controller has its own unit tests (latest-wins, single-flight,
@@ -128,15 +169,16 @@ offline retry):
 npm run test --workspace apps/web
 ```
 
-The live Google OAuth round-trip still requires real credentials and is not
-covered here. Excalidraw canvas rendering is verified only by a production build
-(it needs a browser to exercise fully).
+The live Google OAuth/Drive round-trip still requires real Google credentials
+and is not part of the offline suite. Google-facing behavior is exercised
+through the Drive port and a protocol-level fake; the real adapter is verified
+for resumable request shape without external network access.
 
 ### Notes
 
 Sessions are opaque tokens in an httpOnly cookie (30 days); only their SHA-256
-hash is stored. Drive scope is **not** requested here — it comes later,
-incrementally, when the user first opens Documents.
+hash is stored. Drive scope is **not** requested during sign-in — it is requested
+incrementally from the Documents connect prompt.
 
 **`GoogleCredential` represents a Drive connection, not a Google login.** A row
 exists only after the user completes incremental `drive.file` authorization.

@@ -15,8 +15,9 @@
     "smoke:workspaces": "npm run smoke:schema && tsx scripts/smoke-workspaces.ts",
     "smoke:boards": "npm run smoke:schema && tsx scripts/smoke-boards.ts",
     "smoke:tasks": "npm run smoke:schema && tsx scripts/smoke-tasks.ts",
+    "smoke:documents": "npm run smoke:schema && tsx scripts/smoke-documents.ts",
     "smoke:qa": "npm run smoke:schema && tsx scripts/smoke-qa.ts",
-    "smoke": "npm run smoke:auth && npm run smoke:workspaces && npm run smoke:boards && npm run smoke:tasks && npm run smoke:qa"
+    "smoke": "npm run smoke:auth && npm run smoke:workspaces && npm run smoke:boards && npm run smoke:tasks && npm run smoke:documents && npm run smoke:qa"
   },
   "dependencies": {
     "@plane-and-curves/shared": "*",
@@ -25,8 +26,8 @@
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",
     "express": "^4.19.2",
-    "google-auth-library": "^9.11.0",
-    "googleapis": "^140.0.1",
+    "google-auth-library": "^10.9.1",
+    "googleapis": "^173.0.0",
     "pino": "^9.3.2",
     "pino-http": "^10.2.0",
     "zod": "^3.23.8"

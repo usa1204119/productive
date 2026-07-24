@@ -13,7 +13,7 @@ export function AppShell({ user }: { user: UserDto }) {
         <div className="flex min-h-0 flex-1">
           <Sidebar />
           <main className="min-w-0 flex-1 bg-slate-50">
-            <MainArea />
+            <MainArea user={user} />
           </main>
         </div>
       </div>
@@ -21,7 +21,7 @@ export function AppShell({ user }: { user: UserDto }) {
   );
 }
 
-function MainArea() {
+function MainArea({ user }: { user: UserDto }) {
   const { current, isLoading } = useCurrentWorkspace();
 
   if (isLoading) {
@@ -30,7 +30,7 @@ function MainArea() {
   if (!current) {
     return <Centered>Create a workspace to get started.</Centered>;
   }
-  return <WorkspaceView workspace={current} />;
+  return <WorkspaceView workspace={current} user={user} />;
 }
 
 function Centered({ children }: { children: React.ReactNode }) {

@@ -1,8 +1,18 @@
 import { useEffect, useState } from "react";
-import { CalendarClock, SquareArrowOutUpRight, Trash2, X } from "lucide-react";
+import {
+  AlertTriangle,
+  CalendarClock,
+  ExternalLink,
+  SquareArrowOutUpRight,
+  Trash2,
+  Unlink,
+  X,
+} from "lucide-react";
 import type { TaskDto } from "@plane-and-curves/shared";
 import { useDeleteTask, useUpdateTask } from "../lib/tasks.js";
 import { fromLocalInputValue, toLocalInputValue } from "../lib/dates.js";
+import { useCurrentUser } from "../lib/auth.js";
+import { useAttachDocument, useDocuments } from "../lib/documents.js";
 
 interface TaskPanelProps {
   workspaceId: string;
@@ -15,6 +25,12 @@ interface TaskPanelProps {
 export function TaskPanel({ workspaceId, task, onClose, onViewOnBoard }: TaskPanelProps) {
   const update = useUpdateTask(workspaceId);
   const del = useDeleteTask(workspaceId);
+  const { data: user } = useCurrentUser();
+  const canLoadDocuments = Boolean(user && !user.isGuest && user.driveConnected);
+  const documents = useDocuments(workspaceId, canLoadDocuments);
+  const attach = useAttachDocument(workspaceId);
+  const attachedDocuments =
+    documents.data?.filter((document) => document.taskId === task.id) ?? [];
 
   const [title, setTitle] = useState(task.title);
   const [description, setDescription] = useState(task.description ?? "");
@@ -99,9 +115,59 @@ export function TaskPanel({ workspaceId, task, onClose, onViewOnBoard }: TaskPan
 
         <div>
           <span className="mb-1 block text-xs font-medium text-slate-500">Documents</span>
-          <p className="rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-400">
-            Attaching documents arrives in Step 6.
-          </p>
+          {!canLoadDocuments ? (
+            <p className="rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-400">
+              Connect Google Drive from the Documents tab to attach files.
+            </p>
+          ) : documents.isLoading ? (
+            <p className="rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-400">
+              Loading attached files…
+            </p>
+          ) : attachedDocuments.length === 0 ? (
+            <p className="rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-400">
+              No documents attached.
+            </p>
+          ) : (
+            <ul className="space-y-1.5">
+              {attachedDocuments.map((document) => (
+                <li
+                  key={document.id}
+                  className="flex items-center gap-2 rounded-lg bg-slate-50 px-3 py-2"
+                >
+                  {document.missing ? (
+                    <AlertTriangle className="h-3.5 w-3.5 shrink-0 text-amber-600" />
+                  ) : (
+                    <ExternalLink className="h-3.5 w-3.5 shrink-0 text-slate-400" />
+                  )}
+                  {document.missing ? (
+                    <span className="min-w-0 flex-1 truncate text-xs text-slate-500">
+                      {document.name} · Missing from Drive
+                    </span>
+                  ) : (
+                    <a
+                      href={document.webViewLink}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="min-w-0 flex-1 truncate text-xs font-medium text-accent hover:text-accent-hover"
+                    >
+                      {document.name}
+                    </a>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() =>
+                      attach.mutate({ documentId: document.id, taskId: null })
+                    }
+                    className="rounded p-1 text-slate-400 hover:bg-white hover:text-slate-600"
+                    aria-label={`Detach ${document.name}`}
+                    title="Detach from task"
+                  >
+                    <Unlink className="h-3.5 w-3.5" />
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
         </div>
 
         {task.sourceBoardId && (

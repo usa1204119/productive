@@ -10,8 +10,9 @@ import { AppError } from "../errors.js";
  *
  * intent = "signin"  -> create/find a real user and sign in
  * intent = "link"    -> convert the currently-authenticated guest to Google
+ * intent = "drive"   -> incremental Drive authorization for a signed-in user
  */
-export type OAuthIntent = "signin" | "link";
+export type OAuthIntent = "signin" | "link" | "drive";
 
 const STATE_COOKIE = "pac_oauth_state";
 const STATE_TTL_MS = 10 * 60 * 1000; // 10 minutes
@@ -48,6 +49,9 @@ export function consumeOAuth(req: Request, res: Response, stateFromQuery: string
 
   if (!payload.nonce || payload.nonce !== stateFromQuery) {
     throw new AppError(400, "OAUTH_ERROR", "OAuth state mismatch");
+  }
+  if (!["signin", "link", "drive"].includes(payload.intent)) {
+    throw new AppError(400, "OAUTH_ERROR", "Invalid OAuth intent");
   }
   return payload.intent;
 }
