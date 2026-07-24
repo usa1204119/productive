@@ -5,6 +5,7 @@ import { AppError } from "../errors.js";
 import { logger } from "../logger.js";
 import { requireAuth } from "../middleware/auth.js";
 import { buildSignInUrl, exchangeSignInCode } from "../lib/google.js";
+import { convertGuestToGoogle } from "../lib/conversion.js";
 import { beginOAuth, consumeOAuth } from "../lib/oauthState.js";
 import { ok } from "../lib/respond.js";
 import { createGoogleUser, createGuestUser } from "../lib/users.js";
@@ -82,7 +83,7 @@ authRouter.get("/google/callback", async (req, res) => {
     const identity = await exchangeSignInCode(code);
 
     if (intent === "link") {
-      await convertGuest(req, res, identity);
+      await convertGuest(req, identity);
     } else {
       await signInWithGoogle(res, identity);
     }
@@ -108,51 +109,16 @@ async function signInWithGoogle(
 }
 
 /**
- * Guest -> Google conversion (the main funnel). Runs as ONE transaction so a
- * partial failure can never split the user's work across two identities:
- *   verify identity -> ensure the Google account isn't linked elsewhere ->
- *   update the guest user in place -> commit. The existing workspaces, boards
- *   and tasks stay attached because we update the SAME user row.
- *
- * (Drive GoogleCredential rows are created later, during Drive connection —
- * sign-in scopes yield no refresh token, so there is nothing to store here.)
+ * Guest -> Google conversion (the main funnel). Delegates to the shared,
+ * transactional convertGuestToGoogle so the exact same code path is covered by
+ * the DB smoke test. The user's workspaces/boards/tasks stay attached because
+ * the same user row is updated in place.
  */
 async function convertGuest(
   req: Parameters<typeof getUserFromRequest>[0],
-  res: Parameters<typeof setSessionCookie>[0],
   identity: Awaited<ReturnType<typeof exchangeSignInCode>>,
 ): Promise<void> {
-  const current = req.user!;
-  if (!current.isGuest) {
-    throw new AppError(409, "ALREADY_SIGNED_IN", "Account is already linked to Google");
-  }
-
-  await prisma.$transaction(async (tx) => {
-    const clash = await tx.user.findFirst({
-      where: {
-        id: { not: current.id },
-        OR: [{ googleId: identity.googleId }, { email: identity.email }],
-      },
-    });
-    if (clash) {
-      throw new AppError(
-        409,
-        "GOOGLE_ACCOUNT_ALREADY_LINKED",
-        "This Google account is already connected to another user",
-      );
-    }
-
-    await tx.user.update({
-      where: { id: current.id },
-      data: {
-        googleId: identity.googleId,
-        email: identity.email,
-        name: identity.name,
-        avatarUrl: identity.avatarUrl,
-        isGuest: false,
-      },
-    });
-  });
+  await convertGuestToGoogle(prisma, req.user!.id, identity);
 }
 
 /** Log out: destroy the session and clear the cookie. */

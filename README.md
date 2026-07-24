@@ -47,6 +47,21 @@ npm run dev:web      # http://localhost:5173  (proxies /auth to the server)
 - `POST /auth/logout` — end session.
 - `GET  /auth/me` — current user.
 
+### DB smoke test
+
+```
+npm run smoke:auth --workspace apps/server
+```
+
+Runs the real guest-create and guest→Google conversion code paths against an
+in-process PGlite database (Postgres compiled to WASM) — no server or Docker
+needed. It asserts the transactions execute, a starter workspace is created,
+converted work stays attached to the same user row, and the duplicate-link /
+email-clash guards roll their transaction back. The live Google OAuth
+round-trip still requires real credentials and is not covered here.
+
+### Notes
+
 Sessions are opaque tokens in an httpOnly cookie (30 days); only their SHA-256
 hash is stored. Drive scope is **not** requested here — it comes later,
 incrementally, when the user first opens Documents.

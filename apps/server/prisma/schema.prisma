@@ -7,7 +7,10 @@
 //   so the database, not application code, is the source of truth for cascades.
 
 generator client {
-  provider = "prisma-client-js"
+  provider        = "prisma-client-js"
+  // driverAdapters lets tests run against in-process PGlite (real Postgres, WASM)
+  // without a database server. Production still uses the default connection.
+  previewFeatures = ["driverAdapters"]
 }
 
 datasource db {
