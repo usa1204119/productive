@@ -10,7 +10,10 @@
     "typecheck": "tsc --noEmit",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
-    "smoke:auth": "prisma migrate diff --from-empty --to-schema-datamodel prisma/schema.prisma --script > prisma/smoke-schema.sql && tsx scripts/smoke-auth.ts"
+    "smoke:schema": "prisma migrate diff --from-empty --to-schema-datamodel prisma/schema.prisma --script > prisma/smoke-schema.sql",
+    "smoke:auth": "npm run smoke:schema && tsx scripts/smoke-auth.ts",
+    "smoke:workspaces": "npm run smoke:schema && tsx scripts/smoke-workspaces.ts",
+    "smoke": "npm run smoke:auth && npm run smoke:workspaces"
   },
   "dependencies": {
     "@plane-and-curves/shared": "*",

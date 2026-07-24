@@ -47,18 +47,37 @@ npm run dev:web      # http://localhost:5173  (proxies /auth to the server)
 - `POST /auth/logout` — end session.
 - `GET  /auth/me` — current user.
 
-### DB smoke test
+## Workspaces (Step 3)
+
+All routes require a session and are scoped to the authenticated user.
+
+- `GET    /workspaces` — list the user's workspaces.
+- `POST   /workspaces` — create (max 50 per user, enforced atomically).
+- `PATCH  /workspaces/:workspaceId` — rename.
+- `DELETE /workspaces/:workspaceId` — delete (cascades to boards/tasks/document
+  records; never touches Google Drive files).
+
+Ownership is enforced by shared `requireWorkspace` middleware using a single
+user-scoped query — a workspace the user doesn't own is indistinguishable from a
+missing one (404 `WORKSPACE_NOT_FOUND`).
+
+### DB smoke tests
 
 ```
-npm run smoke:auth --workspace apps/server
+npm run smoke --workspace apps/server    # auth + workspaces
 ```
 
-Runs the real guest-create and guest→Google conversion code paths against an
-in-process PGlite database (Postgres compiled to WASM) — no server or Docker
-needed. It asserts the transactions execute, a starter workspace is created,
-converted work stays attached to the same user row, and the duplicate-link /
-email-clash guards roll their transaction back. The live Google OAuth
-round-trip still requires real credentials and is not covered here.
+Runs the real code paths against an in-process PGlite database (Postgres
+compiled to WASM) — no server or Docker needed:
+
+- `smoke:auth` — guest-create + guest→Google conversion: transactions execute, a
+  starter workspace is created, converted work stays attached to the same user
+  row, and the duplicate-link / email-clash guards roll their transaction back.
+- `smoke:workspaces` — ownership scoping (non-owners get `WORKSPACE_NOT_FOUND`),
+  the atomic per-user 50-limit, and delete cascade to boards/tasks.
+
+The live Google OAuth round-trip still requires real credentials and is not
+covered here.
 
 ### Notes
 
