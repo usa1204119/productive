@@ -1,0 +1,21 @@
+{
+  "name": "plane-and-curves",
+  "private": true,
+  "version": "0.0.0",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "npm run dev --workspace apps/server & npm run dev --workspace apps/web",
+    "dev:server": "npm run dev --workspace apps/server",
+    "dev:web": "npm run dev --workspace apps/web",
+    "build": "npm run build --workspace packages/shared && npm run build --workspace apps/server && npm run build --workspace apps/web",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "prisma:generate": "npm run prisma:generate --workspace apps/server",
+    "prisma:migrate": "npm run prisma:migrate --workspace apps/server"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

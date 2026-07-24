@@ -1,0 +1,148 @@
+// Prisma schema for "Plane and Curves"
+// Step 1 deliverable — for review before any application code is written.
+//
+// Conventions:
+// - All primary keys: String @id @default(cuid())
+// - Delete behaviour is enforced here via onDelete referential actions
+//   so the database, not application code, is the source of truth for cascades.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ---------------------------------------------------------------------------
+// User & auth
+// ---------------------------------------------------------------------------
+
+model User {
+  id                String   @id @default(cuid())
+  googleId          String?  @unique
+  email             String?  @unique
+  name              String
+  avatarUrl         String?
+  isGuest           Boolean  @default(false)
+  driveConnected    Boolean  @default(false)
+  driveRootFolderId String?
+  createdAt         DateTime @default(now())
+
+  workspaces        Workspace[]
+  sessions          Session[]
+  googleCredentials GoogleCredential[]
+  uploadedDocuments Document[]         @relation("UploadedDocuments")
+}
+
+// Deleting a User cascades to their credentials (and by extension revokes them
+// in application logic before the row is removed).
+model GoogleCredential {
+  id                    String    @id @default(cuid())
+  userId                String
+  encryptedRefreshToken String
+  scopes                String[]
+  connectedAt           DateTime  @default(now())
+  revokedAt             DateTime?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model Session {
+  id        String   @id @default(cuid())
+  userId    String
+  tokenHash String   @unique
+  expiresAt DateTime
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+// ---------------------------------------------------------------------------
+// Workspace & contents
+// ---------------------------------------------------------------------------
+
+// Deleting a Workspace cascades to its Boards, Tasks and Document *records*.
+// It never touches actual files/folders in the user's Google Drive — that is
+// enforced in application logic; driveFolderId is only metadata.
+model Workspace {
+  id            String   @id @default(cuid())
+  userId        String
+  name          String
+  driveFolderId String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  user      User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  boards    Board[]
+  tasks     Task[]
+  documents Document[]
+
+  @@index([userId])
+}
+
+model Board {
+  id          String   @id @default(cuid())
+  workspaceId String
+  name        String
+  elements    Json // Excalidraw elements — persisted as received, unknown fields preserved
+  appState    Json // Excalidraw appState
+  updatedAt   DateTime @updatedAt
+
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  // Back-link only; deleting a Board sets Task.sourceBoardId to null (below).
+  sourcedTasks Task[]   @relation("TaskSourceBoard")
+
+  @@index([workspaceId])
+}
+
+model Task {
+  id              String    @id @default(cuid())
+  workspaceId     String
+  title           String
+  description     String?
+  completed       Boolean   @default(false)
+  completedAt     DateTime?
+  order           Float // float ordering: insert between = average neighbours; rebalance below 0.0001 gap
+  dueAt           DateTime? // a DUE date/time — labelled "Due" in the UI
+  sourceBoardId   String?
+  sourceElementId String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  // Deleting a Board must NOT delete tasks — just clear the back-link.
+  sourceBoard Board?    @relation("TaskSourceBoard", fields: [sourceBoardId], references: [id], onDelete: SetNull)
+  documents   Document[]
+
+  @@index([workspaceId])
+  @@index([sourceBoardId])
+}
+
+// No file bytes are ever stored here — only a reference to the file in Drive.
+model Document {
+  id           String   @id @default(cuid())
+  workspaceId  String
+  taskId       String?
+  driveFileId  String
+  name         String
+  mimeType     String
+  sizeBytes    Int // capped at 100 MB by upload validation; well within Int range
+  webViewLink  String
+  iconLink     String?
+  uploadedById String
+  createdAt    DateTime @default(now())
+
+  workspace  Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  // Deleting a Task must NOT delete its documents — just detach them.
+  task       Task?     @relation(fields: [taskId], references: [id], onDelete: SetNull)
+  uploadedBy User      @relation("UploadedDocuments", fields: [uploadedById], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId])
+  @@index([taskId])
+  @@index([uploadedById])
+}
