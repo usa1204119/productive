@@ -5,6 +5,7 @@ import cors from "cors";
 import pinoHttp from "pino-http";
 import { env } from "./env.js";
 import { logger } from "./logger.js";
+import { initDb } from "./db.js";
 import { authRouter } from "./routes/auth.js";
 import { workspacesRouter } from "./routes/workspaces.js";
 import { boardsRouter } from "./routes/boards.js";
@@ -34,6 +35,14 @@ app.use("/workspaces/:workspaceId/tasks", tasksRouter);
 app.use(notFoundHandler);
 app.use(errorHandler);
 
-app.listen(env.PORT, () => {
-  logger.info(`Server listening on ${env.SERVER_URL} (port ${env.PORT})`);
-});
+async function start(): Promise<void> {
+  await initDb();
+  if (process.env.USE_PGLITE === "true") {
+    logger.warn("Using in-memory PGlite demo database — data is ephemeral (DEV ONLY)");
+  }
+  app.listen(env.PORT, () => {
+    logger.info(`Server listening on ${env.SERVER_URL} (port ${env.PORT})`);
+  });
+}
+
+void start();
