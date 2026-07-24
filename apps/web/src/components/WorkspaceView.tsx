@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import type { WorkspaceDto } from "@plane-and-curves/shared";
 import { WhiteboardTab } from "./WhiteboardTab.js";
+import { TasksTab } from "./TasksTab.js";
 
 const TABS = [
   { id: "whiteboard", label: "Whiteboard" },
@@ -27,6 +28,13 @@ export function WorkspaceView({ workspace }: { workspace: WorkspaceDto }) {
     localStorage.setItem(storageKey, id);
   };
 
+  // "View on board" from a task: remember the target board, then switch tabs.
+  // Tasks stay decoupled from Excalidraw — this only passes IDs and changes tab.
+  const viewOnBoard = (boardId: string) => {
+    localStorage.setItem(`pac.board.${workspace.id}`, boardId);
+    choose("whiteboard");
+  };
+
   return (
     <div className="flex h-full flex-col">
       <header className="px-8 pt-6">
@@ -48,27 +56,17 @@ export function WorkspaceView({ workspace }: { workspace: WorkspaceDto }) {
         </div>
       </header>
 
-      {tab === "whiteboard" ? (
-        <div className="min-h-0 flex-1">
-          <WhiteboardTab workspace={workspace} />
-        </div>
-      ) : (
-        <div className="flex-1 overflow-auto p-8">
-          <Placeholder tab={tab} />
-        </div>
-      )}
-    </div>
-  );
-}
-
-function Placeholder({ tab }: { tab: Exclude<TabId, "whiteboard"> }) {
-  const copy: Record<Exclude<TabId, "whiteboard">, string> = {
-    tasks: "The tasks list arrives in Step 5.",
-    documents: "Documents (Google Drive) arrive in Step 6.",
-  };
-  return (
-    <div className="flex h-full items-center justify-center rounded-2xl border border-dashed border-slate-200 bg-white/50">
-      <p className="text-sm text-slate-400">{copy[tab]}</p>
+      <div className="mt-4 min-h-0 flex-1">
+        {tab === "whiteboard" && <WhiteboardTab workspace={workspace} />}
+        {tab === "tasks" && <TasksTab workspace={workspace} onViewOnBoard={viewOnBoard} />}
+        {tab === "documents" && (
+          <div className="h-full overflow-auto p-8">
+            <div className="flex h-full items-center justify-center rounded-2xl border border-dashed border-slate-200 bg-white/50">
+              <p className="text-sm text-slate-400">Documents (Google Drive) arrive in Step 6.</p>
+            </div>
+          </div>
+        )}
+      </div>
     </div>
   );
 }

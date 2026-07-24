@@ -80,6 +80,27 @@ single-flight, latest-wins controller ([sceneSaver.ts](apps/web/src/lib/sceneSav
 that gates on `getSceneVersion`, retries on failure (offline-safe), and drives a
 `Saving… / Saved / Save failed — Retry` chip.
 
+## Tasks (Step 5)
+
+Nested under a workspace, same ownership guard.
+
+- `GET    /workspaces/:workspaceId/tasks` — list, in order.
+- `POST   /workspaces/:workspaceId/tasks` — add (appended at `max(order)+1000`).
+- `PATCH  /workspaces/:workspaceId/tasks/:taskId` — edit title/description/dueAt,
+  or toggle `completed` (server sets/clears `completedAt` on the transition only).
+- `POST   /workspaces/:workspaceId/tasks/:taskId/reorder` — `{ prevId, nextId }`;
+  the server averages neighbour orders and **rebalances** the workspace's tasks
+  to clean 1000-multiples (one transaction) when the gap drops below `0.0001`.
+- `DELETE /workspaces/:workspaceId/tasks/:taskId` — delete; **detaches** its
+  documents (sets `Document.taskId` to null) rather than deleting them.
+
+Due dates are UTC (`timestamptz`) exchanged as ISO strings; the UI converts to
+local. The Tasks tab uses optimistic mutations (toggle/reorder/delete roll back
+on error), `@dnd-kit` for drag-reorder, a collapsible **Done** section (state
+remembered per workspace), a keyboard-first **add** input (Enter creates, keeps
+focus), and a right-hand side panel (Escape closes). The "View on board"
+back-link passes only IDs — the Tasks module has no Excalidraw awareness.
+
 ### DB smoke tests
 
 ```
@@ -96,6 +117,8 @@ compiled to WASM) — no server or Docker needed:
   the atomic per-user 50-limit, and delete cascade to boards/tasks.
 - `smoke:boards` — board CRUD, summaries omit the scene, the scene round-trips
   verbatim (unknown fields preserved), and delete clears task back-links.
+- `smoke:tasks` — append ordering, insert-average, rebalance below 0.0001,
+  completedAt transitions, delete-detaches-documents, and scoping.
 - `smoke:qa` — name validation, Unicode round-trip, and concurrent deletion.
 
 The autosave controller has its own unit tests (latest-wins, single-flight,

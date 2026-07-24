@@ -14,8 +14,9 @@
     "smoke:auth": "npm run smoke:schema && tsx scripts/smoke-auth.ts",
     "smoke:workspaces": "npm run smoke:schema && tsx scripts/smoke-workspaces.ts",
     "smoke:boards": "npm run smoke:schema && tsx scripts/smoke-boards.ts",
+    "smoke:tasks": "npm run smoke:schema && tsx scripts/smoke-tasks.ts",
     "smoke:qa": "npm run smoke:schema && tsx scripts/smoke-qa.ts",
-    "smoke": "npm run smoke:auth && npm run smoke:workspaces && npm run smoke:boards && npm run smoke:qa"
+    "smoke": "npm run smoke:auth && npm run smoke:workspaces && npm run smoke:boards && npm run smoke:tasks && npm run smoke:qa"
   },
   "dependencies": {
     "@plane-and-curves/shared": "*",

@@ -31,7 +31,7 @@ model User {
   isGuest           Boolean  @default(false)
   driveConnected    Boolean  @default(false)
   driveRootFolderId String?
-  createdAt         DateTime @default(now())
+  createdAt         DateTime @default(now()) @db.Timestamptz(3)
 
   workspaces        Workspace[]
   sessions          Session[]
@@ -51,8 +51,8 @@ model GoogleCredential {
   userId                String
   encryptedRefreshToken String
   scopes                String[]
-  connectedAt           DateTime  @default(now())
-  revokedAt             DateTime?
+  connectedAt           DateTime  @default(now()) @db.Timestamptz(3)
+  revokedAt             DateTime? @db.Timestamptz(3)
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
@@ -63,7 +63,7 @@ model Session {
   id        String   @id @default(cuid())
   userId    String
   tokenHash String   @unique
-  expiresAt DateTime
+  expiresAt DateTime @db.Timestamptz(3)
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
@@ -82,8 +82,8 @@ model Workspace {
   userId        String
   name          String
   driveFolderId String?
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  createdAt     DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt     DateTime @updatedAt @db.Timestamptz(3)
 
   user      User       @relation(fields: [userId], references: [id], onDelete: Cascade)
   boards    Board[]
@@ -97,13 +97,21 @@ model Board {
   id          String   @id @default(cuid())
   workspaceId String
   name        String
-  // @db.Json (text `json`, not `jsonb`) stores the scene VERBATIM — Postgres
-  // does not reorder keys or normalise it, honouring "persist as received,
-  // preserve unknown fields". We never query into the scene, so we don't need
-  // jsonb's indexing/operators.
+  // DELIBERATE: `@db.Json` (text `json`), NOT the Prisma default `jsonb`.
+  //
+  // The scene is treated as an opaque Excalidraw *document*, not queryable app
+  // data. `json` preserves the exact textual representation (key order, no
+  // normalisation), so scenes round-trip byte-for-byte and stay forward-
+  // compatible with future Excalidraw versions. `jsonb` reorders keys and
+  // normalises — a smoke test caught it breaking the round-trip.
+  //
+  // TRADE-OFF: `jsonb` would be preferable IF we needed to index or query INTO
+  // the scene. We never do (store/return the whole blob only). Do NOT "optimise"
+  // this to jsonb without revisiting that invariant — you'd reintroduce the
+  // normalisation this exists to avoid.
   elements    Json     @db.Json // Excalidraw elements — persisted exactly as received
   appState    Json     @db.Json // Excalidraw appState — persisted exactly as received
-  updatedAt   DateTime @updatedAt
+  updatedAt   DateTime @updatedAt @db.Timestamptz(3)
 
   workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   // Back-link only; deleting a Board sets Task.sourceBoardId to null (below).
@@ -118,13 +126,15 @@ model Task {
   title           String
   description     String?
   completed       Boolean   @default(false)
-  completedAt     DateTime?
+  // Timestamptz throughout: instants are stored as UTC unambiguously; the UI
+  // converts to the viewer's local timezone.
+  completedAt     DateTime? @db.Timestamptz(3)
   order           Float // float ordering: insert between = average neighbours; rebalance below 0.0001 gap
-  dueAt           DateTime? // a DUE date/time — labelled "Due" in the UI
+  dueAt           DateTime? @db.Timestamptz(3) // a DUE date/time — labelled "Due" in the UI
   sourceBoardId   String?
   sourceElementId String?
-  createdAt       DateTime  @default(now())
-  updatedAt       DateTime  @updatedAt
+  createdAt       DateTime  @default(now()) @db.Timestamptz(3)
+  updatedAt       DateTime  @updatedAt @db.Timestamptz(3)
 
   workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   // Deleting a Board must NOT delete tasks — just clear the back-link.
@@ -147,7 +157,7 @@ model Document {
   webViewLink  String
   iconLink     String?
   uploadedById String
-  createdAt    DateTime @default(now())
+  createdAt    DateTime @default(now()) @db.Timestamptz(3)
 
   workspace  Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   // Deleting a Task must NOT delete its documents — just detach them.
