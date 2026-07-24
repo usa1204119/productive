@@ -50,3 +50,9 @@ npm run dev:web      # http://localhost:5173  (proxies /auth to the server)
 Sessions are opaque tokens in an httpOnly cookie (30 days); only their SHA-256
 hash is stored. Drive scope is **not** requested here — it comes later,
 incrementally, when the user first opens Documents.
+
+**`GoogleCredential` represents a Drive connection, not a Google login.** A row
+exists only after the user completes incremental `drive.file` authorization.
+Users authenticated for identity only (OpenID sign-in) have no `GoogleCredential`
+record — sign-in uses `access_type=online` and returns no refresh token, so
+there is nothing to store until Drive is connected.

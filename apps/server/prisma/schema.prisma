@@ -36,6 +36,11 @@ model User {
   uploadedDocuments Document[]         @relation("UploadedDocuments")
 }
 
+// A GoogleCredential represents a DRIVE CONNECTION, not a general Google login.
+// A row exists ONLY after the user has completed incremental drive.file
+// authorization. Users authenticated for identity only (OpenID sign-in, which
+// uses access_type=online and returns no refresh token) will NOT have a row.
+//
 // Deleting a User cascades to their credentials (and by extension revokes them
 // in application logic before the row is removed).
 model GoogleCredential {
