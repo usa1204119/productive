@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import type { WorkspaceDto } from "@plane-and-curves/shared";
+import { WhiteboardTab } from "./WhiteboardTab.js";
 
 const TABS = [
   { id: "whiteboard", label: "Whiteboard" },
@@ -47,16 +48,21 @@ export function WorkspaceView({ workspace }: { workspace: WorkspaceDto }) {
         </div>
       </header>
 
-      <div className="flex-1 overflow-auto p-8">
-        <Placeholder tab={tab} />
-      </div>
+      {tab === "whiteboard" ? (
+        <div className="min-h-0 flex-1">
+          <WhiteboardTab workspace={workspace} />
+        </div>
+      ) : (
+        <div className="flex-1 overflow-auto p-8">
+          <Placeholder tab={tab} />
+        </div>
+      )}
     </div>
   );
 }
 
-function Placeholder({ tab }: { tab: TabId }) {
-  const copy: Record<TabId, string> = {
-    whiteboard: "The Excalidraw whiteboard arrives in Step 4.",
+function Placeholder({ tab }: { tab: Exclude<TabId, "whiteboard"> }) {
+  const copy: Record<Exclude<TabId, "whiteboard">, string> = {
     tasks: "The tasks list arrives in Step 5.",
     documents: "Documents (Google Drive) arrive in Step 6.",
   };

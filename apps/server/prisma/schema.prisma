@@ -97,8 +97,12 @@ model Board {
   id          String   @id @default(cuid())
   workspaceId String
   name        String
-  elements    Json // Excalidraw elements — persisted as received, unknown fields preserved
-  appState    Json // Excalidraw appState
+  // @db.Json (text `json`, not `jsonb`) stores the scene VERBATIM — Postgres
+  // does not reorder keys or normalise it, honouring "persist as received,
+  // preserve unknown fields". We never query into the scene, so we don't need
+  // jsonb's indexing/operators.
+  elements    Json     @db.Json // Excalidraw elements — persisted exactly as received
+  appState    Json     @db.Json // Excalidraw appState — persisted exactly as received
   updatedAt   DateTime @updatedAt
 
   workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)

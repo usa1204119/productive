@@ -13,7 +13,9 @@
     "smoke:schema": "prisma migrate diff --from-empty --to-schema-datamodel prisma/schema.prisma --script > prisma/smoke-schema.sql",
     "smoke:auth": "npm run smoke:schema && tsx scripts/smoke-auth.ts",
     "smoke:workspaces": "npm run smoke:schema && tsx scripts/smoke-workspaces.ts",
-    "smoke": "npm run smoke:auth && npm run smoke:workspaces"
+    "smoke:boards": "npm run smoke:schema && tsx scripts/smoke-boards.ts",
+    "smoke:qa": "npm run smoke:schema && tsx scripts/smoke-qa.ts",
+    "smoke": "npm run smoke:auth && npm run smoke:workspaces && npm run smoke:boards && npm run smoke:qa"
   },
   "dependencies": {
     "@plane-and-curves/shared": "*",

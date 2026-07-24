@@ -61,6 +61,25 @@ Ownership is enforced by shared `requireWorkspace` middleware using a single
 user-scoped query — a workspace the user doesn't own is indistinguishable from a
 missing one (404 `WORKSPACE_NOT_FOUND`).
 
+## Boards / Whiteboard (Step 4)
+
+Nested under a workspace and guarded by the same ownership middleware.
+
+- `GET    /workspaces/:workspaceId/boards` — list summaries (no scene JSON).
+- `POST   /workspaces/:workspaceId/boards` — create an empty board.
+- `GET    /workspaces/:workspaceId/boards/:boardId` — full board (scene included).
+- `PATCH  /workspaces/:workspaceId/boards/:boardId` — rename.
+- `PUT    /workspaces/:workspaceId/boards/:boardId/scene` — autosave the scene.
+- `DELETE /workspaces/:workspaceId/boards/:boardId` — delete (does not delete
+  tasks; clears their `sourceBoardId`/`sourceElementId` back-links).
+
+The scene is a **transparent store**: `Board.elements`/`appState` use Postgres
+`json` (not `jsonb`) so the Excalidraw scene is persisted verbatim — no key
+reordering, no field stripping. The client autosaves via a debounced,
+single-flight, latest-wins controller ([sceneSaver.ts](apps/web/src/lib/sceneSaver.ts))
+that gates on `getSceneVersion`, retries on failure (offline-safe), and drives a
+`Saving… / Saved / Save failed — Retry` chip.
+
 ### DB smoke tests
 
 ```
@@ -75,9 +94,20 @@ compiled to WASM) — no server or Docker needed:
   row, and the duplicate-link / email-clash guards roll their transaction back.
 - `smoke:workspaces` — ownership scoping (non-owners get `WORKSPACE_NOT_FOUND`),
   the atomic per-user 50-limit, and delete cascade to boards/tasks.
+- `smoke:boards` — board CRUD, summaries omit the scene, the scene round-trips
+  verbatim (unknown fields preserved), and delete clears task back-links.
+- `smoke:qa` — name validation, Unicode round-trip, and concurrent deletion.
+
+The autosave controller has its own unit tests (latest-wins, single-flight,
+offline retry):
+
+```
+npm run test --workspace apps/web
+```
 
 The live Google OAuth round-trip still requires real credentials and is not
-covered here.
+covered here. Excalidraw canvas rendering is verified only by a production build
+(it needs a browser to exercise fully).
 
 ### Notes
 

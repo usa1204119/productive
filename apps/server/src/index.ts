@@ -7,6 +7,7 @@ import { env } from "./env.js";
 import { logger } from "./logger.js";
 import { authRouter } from "./routes/auth.js";
 import { workspacesRouter } from "./routes/workspaces.js";
+import { boardsRouter } from "./routes/boards.js";
 import { errorHandler, notFoundHandler } from "./middleware/error.js";
 import { ok } from "./lib/respond.js";
 
@@ -26,6 +27,7 @@ app.get("/health", (_req, res) => ok(res, { status: "ok" }));
 
 app.use("/auth", authRouter);
 app.use("/workspaces", workspacesRouter);
+app.use("/workspaces/:workspaceId/boards", boardsRouter);
 
 app.use(notFoundHandler);
 app.use(errorHandler);
