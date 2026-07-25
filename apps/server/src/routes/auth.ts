@@ -178,7 +178,11 @@ async function convertGuest(
   req: Parameters<typeof getUserFromRequest>[0],
   identity: Awaited<ReturnType<typeof exchangeSignInCode>>,
 ): Promise<void> {
-  await convertGuestToGoogle(prisma, req.user!.id, identity);
+  // The callback route has no requireAuth, so resolve the guest from their
+  // session cookie (still present on this top-level redirect).
+  const user = await getUserFromRequest(req);
+  if (!user) throw new AppError(401, "UNAUTHENTICATED", "Not signed in");
+  await convertGuestToGoogle(prisma, user.id, identity);
 }
 
 /** Log out: destroy the session and clear the cookie. */

@@ -1,14 +1,33 @@
-import { LogOut, UserRound } from "lucide-react";
+import { LogOut, Menu, UserRound } from "lucide-react";
 import type { UserDto } from "@plane-and-curves/shared";
 import { googleLink, useLogout } from "../lib/auth.js";
 
-/** Slim top bar: identity, guest-conversion prompt, and sign out. */
-export function TopBar({ user }: { user: UserDto }) {
+interface TopBarProps {
+  user: UserDto;
+  sidebarOpen: boolean;
+  onToggleSidebar: () => void;
+}
+
+/** Slim top bar: sidebar toggle, identity, guest-conversion prompt, and sign out. */
+export function TopBar({ user, sidebarOpen, onToggleSidebar }: TopBarProps) {
   const logout = useLogout();
 
   return (
     <header className="flex items-center justify-between border-b border-slate-200 bg-white px-6 py-3">
-      <span className="text-sm font-semibold tracking-tight text-slate-700">Plane and Curves</span>
+      <div className="flex items-center gap-3">
+        <button
+          onClick={onToggleSidebar}
+          className="rounded-lg p-1.5 text-slate-500 transition hover:bg-slate-100 hover:text-slate-700"
+          aria-label={sidebarOpen ? "Close sidebar" : "Open sidebar"}
+          aria-pressed={sidebarOpen}
+          title={sidebarOpen ? "Close sidebar" : "Open sidebar"}
+        >
+          <Menu className="h-5 w-5" />
+        </button>
+        <span className="text-sm font-semibold tracking-tight text-slate-700">
+          Plane and Curves
+        </span>
+      </div>
 
       <div className="flex items-center gap-4">
         {user.isGuest && (
