@@ -1,7 +1,7 @@
 import { LogOut, Menu, UserRound } from "lucide-react";
 import type { UserDto } from "@plane-and-curves/shared";
 import { googleLink, useLogout } from "../lib/auth.js";
-import { useCurrentWorkspace } from "../lib/currentWorkspace.js";
+import { useCurrentWorkspace, type WorkspaceTab } from "../lib/currentWorkspace.js";
 
 interface TopBarProps {
   user: UserDto;
@@ -9,13 +9,43 @@ interface TopBarProps {
   onToggleSidebar: () => void;
 }
 
-/** Slim top bar: sidebar toggle, identity, guest-conversion prompt, and sign out. */
+const TABS: { id: WorkspaceTab; label: string }[] = [
+  { id: "whiteboard", label: "Whiteboard" },
+  { id: "tasks", label: "To do tasks" },
+  { id: "documents", label: "Documents" },
+];
+
+/** Slim top bar: sidebar toggle, identity, centered workspace tabs, and sign out. */
 export function TopBar({ user, sidebarOpen, onToggleSidebar }: TopBarProps) {
   const logout = useLogout();
-  const { current } = useCurrentWorkspace();
+  const { current, tab, setTab } = useCurrentWorkspace();
 
   return (
-    <header className="flex items-center justify-between border-b border-slate-200 bg-white px-4 py-2">
+    <header className="relative flex items-center justify-between border-b border-slate-200 bg-white px-4 py-2">
+      {current && (
+        <div
+          role="tablist"
+          aria-label="Workspace sections"
+          className="absolute left-1/2 top-1/2 hidden -translate-x-1/2 -translate-y-1/2 items-center rounded-xl border border-slate-200 bg-slate-100 p-0.5 md:inline-flex"
+        >
+          {TABS.map((t) => (
+            <button
+              key={t.id}
+              role="tab"
+              aria-selected={tab === t.id}
+              onClick={() => setTab(t.id)}
+              className={`rounded-lg px-3.5 py-1 text-sm font-medium transition ${
+                tab === t.id
+                  ? "bg-white text-accent shadow-sm"
+                  : "text-slate-500 hover:text-slate-700"
+              }`}
+            >
+              {t.label}
+            </button>
+          ))}
+        </div>
+      )}
+
       <div className="flex items-center gap-3">
         <button
           onClick={onToggleSidebar}

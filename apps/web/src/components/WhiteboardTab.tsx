@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type ComponentProps } from "react";
 import { Excalidraw } from "@excalidraw/excalidraw";
 import { Check, ListPlus, Loader2, Plus, TriangleAlert } from "lucide-react";
-import type { BoardElementInput, BridgeResultDto, WorkspaceDto } from "@plane-and-curves/shared";
+import type { BoardElementInput, BoardSummaryDto, BridgeResultDto, WorkspaceDto } from "@plane-and-curves/shared";
 import { useBoard, useBoards, useCreateBoard } from "../lib/boards.js";
 import { useSceneSaver } from "../lib/useSceneSaver.js";
 import { useCreateTasksFromSelection } from "../lib/bridge.js";
@@ -23,7 +23,7 @@ interface WhiteboardTabProps {
   onFocusHandled?: () => void;
 }
 
-/** Whiteboard tab: board switcher + New Board on top, Excalidraw fills the rest. */
+/** Whiteboard tab: the board switcher lives inside Excalidraw's top toolbar. */
 export function WhiteboardTab({ workspace, focus, onFocusHandled }: WhiteboardTabProps) {
   const { data: boards = [], isLoading } = useBoards(workspace.id);
   const create = useCreateBoard(workspace.id);
@@ -75,54 +75,44 @@ export function WhiteboardTab({ workspace, focus, onFocusHandled }: WhiteboardTa
     );
   }
 
-  return (
-    <div className="flex h-full flex-col">
-      <div className="flex items-center gap-3 border-b border-slate-200 bg-white px-4 py-2">
-        <select
-          value={boardId ?? ""}
-          onChange={(e) => select(e.target.value)}
-          className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm text-slate-700 outline-none focus:border-accent"
-        >
-          {boards.map((b) => (
-            <option key={b.id} value={b.id}>
-              {b.name}
-            </option>
-          ))}
-        </select>
-        <button
-          onClick={onNewBoard}
-          disabled={create.isPending}
-          className="inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:opacity-60"
-        >
-          <Plus className="h-4 w-4" />
-          New Board
-        </button>
-      </div>
+  if (!boardId) return <FullMessage>Select a board.</FullMessage>;
 
-      {boardId && (
-        <BoardCanvas
-          key={boardId}
-          workspaceId={workspace.id}
-          boardId={boardId}
-          focus={focus && focus.boardId === boardId ? focus : null}
-          onFocusHandled={onFocusHandled}
-        />
-      )}
-    </div>
+  return (
+    <BoardCanvas
+      key={boardId}
+      workspaceId={workspace.id}
+      boardId={boardId}
+      boards={boards}
+      creating={create.isPending}
+      onSelect={select}
+      onNewBoard={onNewBoard}
+      focus={focus && focus.boardId === boardId ? focus : null}
+      onFocusHandled={onFocusHandled}
+    />
   );
+}
+
+interface BoardCanvasProps {
+  workspaceId: string;
+  boardId: string;
+  boards: BoardSummaryDto[];
+  creating: boolean;
+  onSelect: (id: string) => void;
+  onNewBoard: () => void;
+  focus: BoardFocusRequest | null;
+  onFocusHandled?: () => void;
 }
 
 function BoardCanvas({
   workspaceId,
   boardId,
+  boards,
+  creating,
+  onSelect,
+  onNewBoard,
   focus,
   onFocusHandled,
-}: {
-  workspaceId: string;
-  boardId: string;
-  focus: BoardFocusRequest | null;
-  onFocusHandled?: () => void;
-}) {
+}: BoardCanvasProps) {
   const { data: board, isLoading, isError } = useBoard(workspaceId, boardId);
   const saver = useSceneSaver(workspaceId, boardId);
   const addToTasks = useCreateTasksFromSelection(workspaceId);
@@ -189,10 +179,15 @@ function BoardCanvas({
   if (isError || !board) return <FullMessage>Could not load this board.</FullMessage>;
 
   return (
-    <div className="relative min-h-0 flex-1">
-      {/* Floating "Add to tasks" toolbar — appears only when something is selected. */}
+    <div className="relative h-full min-h-0">
+      {/* Saved indicator — bottom-centre so it never covers Excalidraw's UI. */}
+      <div className="pointer-events-none absolute bottom-3 left-1/2 z-20 -translate-x-1/2">
+        <SaveChip status={saver.status} onRetry={saver.retryNow} />
+      </div>
+
+      {/* Floating "Add to tasks" — appears only when elements are selected. */}
       {selectedCount > 0 && (
-        <div className="absolute left-1/2 top-3 z-10 -translate-x-1/2">
+        <div className="absolute bottom-14 left-1/2 z-20 -translate-x-1/2">
           <button
             onClick={onAddToTasks}
             disabled={addToTasks.isPending}
@@ -209,12 +204,8 @@ function BoardCanvas({
         </div>
       )}
 
-      <div className="absolute right-3 top-3 z-10">
-        <SaveChip status={saver.status} onRetry={saver.retryNow} />
-      </div>
-
       {toast && (
-        <div className="absolute bottom-4 left-1/2 z-10 -translate-x-1/2">
+        <div className="absolute left-1/2 top-3 z-20 -translate-x-1/2">
           <span
             className={`rounded-full px-4 py-2 text-sm font-medium shadow-md ${
               toast.kind === "ok" ? "bg-slate-800 text-white" : "bg-amber-50 text-amber-800"
@@ -227,6 +218,15 @@ function BoardCanvas({
 
       <Excalidraw
         excalidrawAPI={(api) => (apiRef.current = api)}
+        renderTopRightUI={() => (
+          <BoardBar
+            boards={boards}
+            boardId={boardId}
+            creating={creating}
+            onSelect={onSelect}
+            onNewBoard={onNewBoard}
+          />
+        )}
         initialData={{
           elements: Array.isArray(board.elements) ? (board.elements as never) : ([] as never),
           appState: sanitizeAppState(board.appState as Record<string, unknown>) as never,
@@ -246,6 +246,47 @@ function BoardCanvas({
   );
 }
 
+/** Board switcher + New Board, rendered inside Excalidraw's top toolbar. */
+function BoardBar({
+  boards,
+  boardId,
+  creating,
+  onSelect,
+  onNewBoard,
+}: {
+  boards: BoardSummaryDto[];
+  boardId: string;
+  creating: boolean;
+  onSelect: (id: string) => void;
+  onNewBoard: () => void;
+}) {
+  return (
+    <div className="flex items-center gap-1.5">
+      <select
+        value={boardId}
+        onChange={(e) => onSelect(e.target.value)}
+        aria-label="Switch board"
+        className="h-9 max-w-[10rem] rounded-lg border border-slate-200 bg-white px-2 text-sm text-slate-700 outline-none focus:border-accent"
+      >
+        {boards.map((b) => (
+          <option key={b.id} value={b.id}>
+            {b.name}
+          </option>
+        ))}
+      </select>
+      <button
+        onClick={onNewBoard}
+        disabled={creating}
+        title="New board"
+        aria-label="New board"
+        className="flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-600 transition hover:bg-slate-50 disabled:opacity-60"
+      >
+        <Plus className="h-4 w-4" />
+      </button>
+    </div>
+  );
+}
+
 /**
  * Excalidraw's `collaborators` is a Map at runtime. Once persisted as JSON it
  * comes back as a plain object, and Excalidraw's restore calls `.forEach` on it
@@ -261,9 +302,7 @@ function sanitizeAppState(appState: Record<string, unknown>): Record<string, unk
 function summarize(res: BridgeResultDto): string {
   const n = res.created.length;
   if (n === 0) {
-    return res.skipped > 0
-      ? `No text elements selected (skipped ${res.skipped}).`
-      : "Nothing to add.";
+    return res.skipped > 0 ? `No text elements selected (skipped ${res.skipped}).` : "Nothing to add.";
   }
   const parts = [`Created ${n} task${n === 1 ? "" : "s"}`];
   if (res.skipped > 0) parts.push(`skipped ${res.skipped} non-text`);
@@ -276,7 +315,7 @@ function SaveChip({ status, onRetry }: { status: SaveStatus; onRetry: () => void
 
   if (status === "error") {
     return (
-      <span className="inline-flex items-center gap-1.5 rounded-full bg-rose-50 px-3 py-1 text-xs font-medium text-rose-700 shadow-sm">
+      <span className="pointer-events-auto inline-flex items-center gap-1.5 rounded-full bg-rose-50 px-3 py-1 text-xs font-medium text-rose-700 shadow-sm">
         <TriangleAlert className="h-3.5 w-3.5" />
         Save failed
         <button onClick={onRetry} className="ml-1 underline underline-offset-2 hover:no-underline">

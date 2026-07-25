@@ -4,11 +4,20 @@ import { useWorkspaces } from "./workspaces.js";
 
 const STORAGE_KEY = "pac.currentWorkspaceId";
 
+/** The three workspace sections. Tab lives here so the navbar and the panel share it. */
+export type WorkspaceTab = "whiteboard" | "tasks" | "documents";
+
+const tabKey = (workspaceId: string) => `pac.tab.${workspaceId}`;
+const readTab = (workspaceId: string): WorkspaceTab =>
+  (localStorage.getItem(tabKey(workspaceId)) as WorkspaceTab) || "whiteboard";
+
 interface CurrentWorkspaceValue {
   workspaces: WorkspaceDto[];
   current: WorkspaceDto | null;
   isLoading: boolean;
   select: (id: string) => void;
+  tab: WorkspaceTab;
+  setTab: (tab: WorkspaceTab) => void;
 }
 
 const Ctx = createContext<CurrentWorkspaceValue | null>(null);
@@ -38,6 +47,12 @@ export function CurrentWorkspaceProvider({ children }: { children: React.ReactNo
     }
   }, [current, selectedId]);
 
+  // Active tab, remembered per workspace and restored when the workspace changes.
+  const [tab, setTabState] = useState<WorkspaceTab>("whiteboard");
+  useEffect(() => {
+    if (current) setTabState(readTab(current.id));
+  }, [current?.id]);
+
   const value: CurrentWorkspaceValue = {
     workspaces,
     current,
@@ -45,6 +60,11 @@ export function CurrentWorkspaceProvider({ children }: { children: React.ReactNo
     select: (id) => {
       setSelectedId(id);
       localStorage.setItem(STORAGE_KEY, id);
+    },
+    tab,
+    setTab: (next) => {
+      setTabState(next);
+      if (current) localStorage.setItem(tabKey(current.id), next);
     },
   };
 
