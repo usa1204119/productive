@@ -6,10 +6,12 @@
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "build": "tsc",
-    "start": "node dist/index.js",
+    "start": "tsx src/index.ts",
     "typecheck": "tsc --noEmit",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
+    "db:push": "prisma db push",
+    "db:deploy": "prisma migrate deploy",
     "smoke:schema": "prisma migrate diff --from-empty --to-schema-datamodel prisma/schema.prisma --script > prisma/smoke-schema.sql",
     "smoke:auth": "npm run smoke:schema && tsx scripts/smoke-auth.ts",
     "smoke:workspaces": "npm run smoke:schema && tsx scripts/smoke-workspaces.ts",

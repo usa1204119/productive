@@ -1,0 +1,10 @@
+node_modules
+**/node_modules
+**/dist
+.git
+.env
+**/.env
+apps/server/prisma/smoke-schema.sql
+*.log
+.vscode
+.idea

@@ -3,9 +3,10 @@ import express from "express";
 import cookieParser from "cookie-parser";
 import cors from "cors";
 import pinoHttp from "pino-http";
-import { env } from "./env.js";
+import { env, isProd } from "./env.js";
 import { logger } from "./logger.js";
 import { initDb } from "./db.js";
+import { serveWeb } from "./serveWeb.js";
 import { authRouter } from "./routes/auth.js";
 import { workspacesRouter } from "./routes/workspaces.js";
 import { boardsRouter } from "./routes/boards.js";
@@ -15,6 +16,10 @@ import { errorHandler, notFoundHandler } from "./middleware/error.js";
 import { ok } from "./lib/respond.js";
 
 const app = express();
+
+// Behind a managed-platform TLS proxy: trust it so secure cookies and the
+// client IP are handled correctly.
+if (isProd) app.set("trust proxy", 1);
 
 app.use(pinoHttp({ logger }));
 app.use(
@@ -33,6 +38,10 @@ app.use("/workspaces", workspacesRouter);
 app.use("/workspaces/:workspaceId/boards", boardsRouter);
 app.use("/workspaces/:workspaceId/tasks", tasksRouter);
 app.use("/workspaces/:workspaceId/documents", documentsRouter);
+
+// In production, serve the built web app from this same origin (after the API
+// routes, before the JSON 404 handler).
+if (isProd) serveWeb(app);
 
 app.use(notFoundHandler);
 app.use(errorHandler);
