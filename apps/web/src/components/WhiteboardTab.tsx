@@ -228,8 +228,8 @@ function BoardCanvas({
       <Excalidraw
         excalidrawAPI={(api) => (apiRef.current = api)}
         initialData={{
-          elements: board.elements as never,
-          appState: board.appState as never,
+          elements: Array.isArray(board.elements) ? (board.elements as never) : ([] as never),
+          appState: sanitizeAppState(board.appState as Record<string, unknown>) as never,
           scrollToContent: true,
         }}
         onChange={(elements, appState) => {
@@ -238,12 +238,24 @@ function BoardCanvas({
           if (!primed.current) return; // ignore the initial restore emit
           saver.schedule({
             elements: elements as readonly unknown[],
-            appState: appState as unknown as Record<string, unknown>,
+            appState: sanitizeAppState(appState as unknown as Record<string, unknown>),
           });
         }}
       />
     </div>
   );
+}
+
+/**
+ * Excalidraw's `collaborators` is a Map at runtime. Once persisted as JSON it
+ * comes back as a plain object, and Excalidraw's restore calls `.forEach` on it
+ * -> "forEach is not a function". Strip it (Excalidraw rebuilds an empty Map),
+ * both when loading a scene and before saving one. Element data is untouched.
+ */
+function sanitizeAppState(appState: Record<string, unknown>): Record<string, unknown> {
+  if (!appState || typeof appState !== "object") return {};
+  const { collaborators: _collaborators, ...rest } = appState;
+  return rest;
 }
 
 function summarize(res: BridgeResultDto): string {

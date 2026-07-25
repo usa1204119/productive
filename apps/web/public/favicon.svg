@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <rect width="512" height="512" rx="112" fill="#b9d9f5"/>
+  <!-- upward growth arrow -->
+  <path d="M168 344 L360 170" fill="none" stroke="#111111" stroke-width="54" stroke-linecap="round"/>
+  <path d="M298 156 L376 156 L376 234" fill="none" stroke="#111111" stroke-width="54"
+        stroke-linecap="round" stroke-linejoin="round"/>
+  <!-- start dot -->
+  <circle cx="168" cy="344" r="60" fill="#111111"/>
+  <circle cx="168" cy="344" r="37" fill="#ffe22e"/>
+</svg>

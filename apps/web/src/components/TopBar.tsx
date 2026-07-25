@@ -1,6 +1,7 @@
 import { LogOut, Menu, UserRound } from "lucide-react";
 import type { UserDto } from "@plane-and-curves/shared";
 import { googleLink, useLogout } from "../lib/auth.js";
+import { useCurrentWorkspace } from "../lib/currentWorkspace.js";
 
 interface TopBarProps {
   user: UserDto;
@@ -11,6 +12,7 @@ interface TopBarProps {
 /** Slim top bar: sidebar toggle, identity, guest-conversion prompt, and sign out. */
 export function TopBar({ user, sidebarOpen, onToggleSidebar }: TopBarProps) {
   const logout = useLogout();
+  const { current } = useCurrentWorkspace();
 
   return (
     <header className="flex items-center justify-between border-b border-slate-200 bg-white px-4 py-2">
@@ -27,6 +29,14 @@ export function TopBar({ user, sidebarOpen, onToggleSidebar }: TopBarProps) {
         <span className="text-sm font-semibold tracking-tight text-slate-700">
           Swift Productive
         </span>
+        {current && (
+          <>
+            <span className="text-slate-300">/</span>
+            <span className="max-w-[14rem] truncate text-sm font-medium text-slate-600">
+              {current.name}
+            </span>
+          </>
+        )}
       </div>
 
       <div className="flex items-center gap-4">

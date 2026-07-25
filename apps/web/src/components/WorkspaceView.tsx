@@ -63,10 +63,7 @@ export function WorkspaceView({
 
   return (
     <div className="flex h-full flex-col">
-      <header className="flex flex-col items-center gap-2.5 border-b border-slate-200 px-6 py-3">
-        <h1 className="max-w-full truncate text-base font-semibold text-slate-800">
-          {workspace.name}
-        </h1>
+      <header className="flex items-center justify-center border-b border-slate-200 px-6 py-2">
         <div
           role="tablist"
           aria-label="Workspace sections"
