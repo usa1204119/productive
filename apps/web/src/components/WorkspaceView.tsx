@@ -1,5 +1,6 @@
 import { lazy, Suspense, useEffect, useState } from "react";
 import type { UserDto, WorkspaceDto } from "@plane-and-curves/shared";
+import type { BoardFocusRequest } from "./WhiteboardTab.js";
 
 // Excalidraw is intentionally isolated in the Whiteboard chunk; users opening
 // Tasks or Documents should not download the large canvas runtime up front.
@@ -43,15 +44,19 @@ export function WorkspaceView({
     setTab((localStorage.getItem(storageKey) as TabId) ?? "whiteboard");
   }, [storageKey]);
 
+  const [focus, setFocus] = useState<BoardFocusRequest | null>(null);
+
   const choose = (id: TabId) => {
     setTab(id);
     localStorage.setItem(storageKey, id);
   };
 
-  // "View on board" from a task: remember the target board, then switch tabs.
-  // Tasks stay decoupled from Excalidraw — this only passes IDs and changes tab.
-  const viewOnBoard = (boardId: string) => {
+  // "View on board" from a task: remember the target board, request focus on the
+  // source element, then switch tabs. Tasks stay decoupled from Excalidraw — this
+  // only passes IDs; the Whiteboard tab performs the zoom/select.
+  const viewOnBoard = (boardId: string, elementId: string | null) => {
     localStorage.setItem(`pac.board.${workspace.id}`, boardId);
+    setFocus(elementId ? { boardId, elementId } : null);
     choose("whiteboard");
   };
 
@@ -97,7 +102,13 @@ export function WorkspaceView({
             </div>
           }
         >
-          {tab === "whiteboard" && <WhiteboardTab workspace={workspace} />}
+          {tab === "whiteboard" && (
+            <WhiteboardTab
+              workspace={workspace}
+              focus={focus}
+              onFocusHandled={() => setFocus(null)}
+            />
+          )}
           {tab === "tasks" && (
             <TasksTab workspace={workspace} onViewOnBoard={viewOnBoard} />
           )}

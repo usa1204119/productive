@@ -17,7 +17,8 @@
     "smoke:tasks": "npm run smoke:schema && tsx scripts/smoke-tasks.ts",
     "smoke:documents": "npm run smoke:schema && tsx scripts/smoke-documents.ts",
     "smoke:qa": "npm run smoke:schema && tsx scripts/smoke-qa.ts",
-    "smoke": "npm run smoke:auth && npm run smoke:workspaces && npm run smoke:boards && npm run smoke:tasks && npm run smoke:documents && npm run smoke:qa"
+    "smoke:bridge": "npm run smoke:schema && tsx scripts/smoke-bridge.ts",
+    "smoke": "npm run smoke:auth && npm run smoke:workspaces && npm run smoke:boards && npm run smoke:tasks && npm run smoke:documents && npm run smoke:bridge && npm run smoke:qa"
   },
   "dependencies": {
     "@plane-and-curves/shared": "*",

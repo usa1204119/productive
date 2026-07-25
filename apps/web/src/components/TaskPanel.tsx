@@ -18,7 +18,7 @@ interface TaskPanelProps {
   workspaceId: string;
   task: TaskDto;
   onClose: () => void;
-  onViewOnBoard: (boardId: string) => void;
+  onViewOnBoard: (boardId: string, elementId: string | null) => void;
 }
 
 /** Right-hand side panel for a single task (not a modal). Escape closes it. */
@@ -172,7 +172,7 @@ export function TaskPanel({ workspaceId, task, onClose, onViewOnBoard }: TaskPan
 
         {task.sourceBoardId && (
           <button
-            onClick={() => onViewOnBoard(task.sourceBoardId!)}
+            onClick={() => onViewOnBoard(task.sourceBoardId!, task.sourceElementId)}
             className="inline-flex items-center gap-1.5 text-sm font-medium text-accent hover:text-accent-hover"
           >
             <SquareArrowOutUpRight className="h-4 w-4" />

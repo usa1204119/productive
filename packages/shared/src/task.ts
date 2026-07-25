@@ -1,6 +1,13 @@
 import { z } from "zod";
 
-const title = z.string().trim().min(1, "Title is required").max(500, "Title is too long");
+/** Max task title length (shared by the add form and the board→tasks bridge). */
+export const MAX_TASK_TITLE_LENGTH = 500;
+
+const title = z
+  .string()
+  .trim()
+  .min(1, "Title is required")
+  .max(MAX_TASK_TITLE_LENGTH, "Title is too long");
 // Nullable, trimmable free text; empty string normalises to null.
 const description = z
   .string()

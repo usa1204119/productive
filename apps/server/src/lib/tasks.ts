@@ -45,6 +45,46 @@ export async function createTask(
   return db.task.create({ data: { workspaceId, title, order } });
 }
 
+/** A task to create in bulk. `source*` back-links are optional (set by the bridge). */
+export interface TaskDraft {
+  title: string;
+  sourceBoardId?: string | null;
+  sourceElementId?: string | null;
+}
+
+/**
+ * Create many tasks in ONE transaction (all-or-nothing), each appended in order.
+ * Excalidraw-agnostic on purpose: the board->tasks bridge builds the drafts and
+ * calls this; the task layer never knows where the drafts came from.
+ */
+export async function createManyTasks(
+  db: PrismaClient,
+  workspaceId: string,
+  drafts: TaskDraft[],
+): Promise<Task[]> {
+  if (drafts.length === 0) return [];
+  return db.$transaction(async (tx) => {
+    const agg = await tx.task.aggregate({ where: { workspaceId }, _max: { order: true } });
+    let order = agg._max.order ?? 0;
+    const created: Task[] = [];
+    for (const draft of drafts) {
+      order += ORDER_STEP;
+      created.push(
+        await tx.task.create({
+          data: {
+            workspaceId,
+            title: draft.title,
+            order,
+            sourceBoardId: draft.sourceBoardId ?? null,
+            sourceElementId: draft.sourceElementId ?? null,
+          },
+        }),
+      );
+    }
+    return created;
+  });
+}
+
 /**
  * Patch a task. Completion is a transition: completedAt is set only when going
  * incomplete -> complete, and cleared when reopening; an unchanged `completed`

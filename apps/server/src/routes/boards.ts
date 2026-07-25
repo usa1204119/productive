@@ -2,6 +2,7 @@ import { Router } from "express";
 import {
   boardParamsSchema,
   createBoardSchema,
+  createTasksFromSelectionSchema,
   renameBoardSchema,
   saveSceneSchema,
 } from "@plane-and-curves/shared";
@@ -20,6 +21,7 @@ import {
   toBoardDto,
   toBoardSummaryDto,
 } from "../lib/boards.js";
+import { createTasksFromSelection } from "../lib/bridge/index.js";
 
 // Mounted at /workspaces/:workspaceId/boards — mergeParams exposes :workspaceId.
 export const boardsRouter = Router({ mergeParams: true });
@@ -84,6 +86,32 @@ boardsRouter.put(
         appState: Record<string, unknown>;
       };
       ok(res, await saveScene(prisma, req.workspace!.id, req.params.boardId!, elements, appState));
+    } catch (err) {
+      next(err);
+    }
+  },
+);
+
+/**
+ * Board -> tasks bridge: turn a selection of Excalidraw elements into tasks.
+ * The processor decides which elements become tasks; creation is transactional.
+ */
+boardsRouter.post(
+  "/:boardId/tasks-from-selection",
+  validateParams(boardParamsSchema),
+  validateBody(createTasksFromSelectionSchema),
+  async (req, res, next) => {
+    try {
+      const { elements } = req.body as {
+        elements: { id: string; type: string; text?: string | null }[];
+      };
+      const result = await createTasksFromSelection(
+        prisma,
+        req.workspace!.id,
+        req.params.boardId!,
+        elements,
+      );
+      ok(res, result, 201);
     } catch (err) {
       next(err);
     }

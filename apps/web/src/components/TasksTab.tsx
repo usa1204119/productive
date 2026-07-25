@@ -14,7 +14,7 @@ import {
   verticalListSortingStrategy,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { ChevronRight, GripVertical } from "lucide-react";
+import { ChevronRight, GripVertical, MapPin } from "lucide-react";
 import type { TaskDto, WorkspaceDto } from "@plane-and-curves/shared";
 import { useCreateTask, useReorderTask, useTasks, useUpdateTask } from "../lib/tasks.js";
 import { formatDueChip, isOverdue } from "../lib/dates.js";
@@ -25,7 +25,7 @@ export function TasksTab({
   onViewOnBoard,
 }: {
   workspace: WorkspaceDto;
-  onViewOnBoard: (boardId: string) => void;
+  onViewOnBoard: (boardId: string, elementId: string | null) => void;
 }) {
   const { data: tasks = [], isLoading } = useTasks(workspace.id);
   const create = useCreateTask(workspace.id);
@@ -107,6 +107,7 @@ export function TasksTab({
                           onToggle={() =>
                             update.mutate({ id: task.id, patch: { completed: true } })
                           }
+                          onViewOnBoard={onViewOnBoard}
                         />
                       ))}
                     </ul>
@@ -183,11 +184,13 @@ function SortableTaskRow({
   selected,
   onSelect,
   onToggle,
+  onViewOnBoard,
 }: {
   task: TaskDto;
   selected: boolean;
   onSelect: () => void;
   onToggle: () => void;
+  onViewOnBoard: (boardId: string, elementId: string | null) => void;
 }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: task.id,
@@ -220,6 +223,16 @@ function SortableTaskRow({
       <button onClick={onSelect} className="min-w-0 flex-1 truncate text-left text-sm text-slate-700">
         {task.title}
       </button>
+      {task.sourceBoardId && (
+        <button
+          onClick={() => onViewOnBoard(task.sourceBoardId!, task.sourceElementId)}
+          className="shrink-0 rounded p-1 text-slate-300 transition hover:bg-slate-100 hover:text-accent"
+          aria-label="View on board"
+          title="View on board"
+        >
+          <MapPin className="h-3.5 w-3.5" />
+        </button>
+      )}
       {task.dueAt && <DueChip iso={task.dueAt} />}
     </li>
   );
