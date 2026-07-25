@@ -1,6 +1,7 @@
 import { lazy, Suspense, useEffect, useState } from "react";
 import type { UserDto, WorkspaceDto } from "@plane-and-curves/shared";
 import type { BoardFocusRequest } from "./WhiteboardTab.js";
+import { ErrorBoundary } from "./ErrorBoundary.js";
 
 // Excalidraw is intentionally isolated in the Whiteboard chunk; users opening
 // Tasks or Documents should not download the large canvas runtime up front.
@@ -62,13 +63,11 @@ export function WorkspaceView({
 
   return (
     <div className="flex h-full flex-col">
-      <header className="px-8 pt-6">
-        <h1 className="text-lg font-semibold text-slate-800">{workspace.name}</h1>
-        <div
-          className="mt-4 flex gap-6 border-b border-slate-200"
-          role="tablist"
-          aria-label="Workspace sections"
-        >
+      <header className="flex items-center gap-4 border-b border-slate-200 px-6">
+        <h1 className="shrink-0 truncate py-2.5 text-sm font-semibold text-slate-800">
+          {workspace.name}
+        </h1>
+        <div className="flex gap-5" role="tablist" aria-label="Workspace sections">
           {TABS.map((t) => (
             <button
               key={t.id}
@@ -77,7 +76,7 @@ export function WorkspaceView({
               aria-selected={tab === t.id}
               aria-controls={`workspace-panel-${t.id}`}
               onClick={() => choose(t.id)}
-              className={`-mb-px border-b-2 pb-2 text-sm font-medium transition ${
+              className={`-mb-px border-b-2 py-2.5 text-sm font-medium transition ${
                 tab === t.id
                   ? "border-accent text-accent"
                   : "border-transparent text-slate-500 hover:text-slate-700"
@@ -93,29 +92,27 @@ export function WorkspaceView({
         id={`workspace-panel-${tab}`}
         role="tabpanel"
         aria-labelledby={`workspace-tab-${tab}`}
-        className="mt-4 min-h-0 flex-1"
+        className="min-h-0 flex-1"
       >
-        <Suspense
-          fallback={
-            <div className="flex h-full items-center justify-center text-sm text-slate-400">
-              Loading workspace…
-            </div>
-          }
-        >
-          {tab === "whiteboard" && (
-            <WhiteboardTab
-              workspace={workspace}
-              focus={focus}
-              onFocusHandled={() => setFocus(null)}
-            />
-          )}
-          {tab === "tasks" && (
-            <TasksTab workspace={workspace} onViewOnBoard={viewOnBoard} />
-          )}
-          {tab === "documents" && (
-            <DocumentsTab workspace={workspace} user={user} />
-          )}
-        </Suspense>
+        <ErrorBoundary>
+          <Suspense
+            fallback={
+              <div className="flex h-full items-center justify-center text-sm text-slate-400">
+                Loading…
+              </div>
+            }
+          >
+            {tab === "whiteboard" && (
+              <WhiteboardTab
+                workspace={workspace}
+                focus={focus}
+                onFocusHandled={() => setFocus(null)}
+              />
+            )}
+            {tab === "tasks" && <TasksTab workspace={workspace} onViewOnBoard={viewOnBoard} />}
+            {tab === "documents" && <DocumentsTab workspace={workspace} user={user} />}
+          </Suspense>
+        </ErrorBoundary>
       </div>
     </div>
   );
