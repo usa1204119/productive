@@ -1,8 +1,49 @@
-# Deploying to Railway
+# Deploying
 
 The app deploys as **one service**: the Docker image builds the web app and runs
 the Express server, which serves the web app **and** the API from a single
 origin. That keeps session cookies first-party (no CORS, no cross-site issues).
+Do **not** split the frontend and backend onto different domains — the session
+cookie would become cross-site (third-party), which browsers increasingly block.
+
+Two hosts are covered: **Render (free)** and **Railway**. The database is
+external (Supabase or Neon) either way.
+
+---
+
+# Option A — Render (free) + Supabase
+
+## 1. Supabase database
+- Create a project at supabase.com. Set a database password.
+- **Settings → Database → Connection string → "Session pooler"** (port **5432**,
+  host `…pooler.supabase.com`). Use THIS as `DATABASE_URL`.
+  - Why the session pooler: it's IPv4 (Render's outbound is IPv4; Supabase's
+    *direct* connection is IPv6-only) **and** it supports Prisma's schema
+    push/migrations. Do **not** use the *transaction* pooler (port 6543) — it
+    breaks Prisma migrations.
+  - Replace `[YOUR-PASSWORD]`, and append `?sslmode=require` if it's not there.
+
+## 2. Render service
+- Push this repo (done). Render → **New → Blueprint** → pick the repo. It reads
+  [`render.yaml`](render.yaml) and creates a free Docker web service.
+  (Or **New → Web Service → Docker** and select the repo manually.)
+- Render assigns a URL like `https://<your-app>.onrender.com`.
+
+## 3. Environment variables (Render → the service → Environment)
+`PORT` is injected by Render automatically. Set the rest (same as the table
+below), using your `onrender.com` URL for `SERVER_URL` / `WEB_URL` / the two
+redirect URIs, and the Supabase session-pooler string for `DATABASE_URL`.
+
+## 4. Google Console + deploy
+Add the `onrender.com` redirect URIs / origin (see the Google section below),
+then trigger a deploy. Note: the free instance **sleeps after ~15 min idle** and
+takes ~30–60s to wake on the first request — expected on the free tier.
+
+---
+
+# Option B — Railway
+
+The app deploys as **one service** (same single-origin model).
 
 ## 1. Push to GitHub
 Railway deploys from a GitHub repo. Push this repo, then in Railway:

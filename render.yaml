@@ -1,0 +1,36 @@
+# Render Blueprint — one Docker web service that serves the web app AND the API
+# from a single origin (first-party cookies, no CORS). Database is external
+# (Supabase). Import via Render → New → Blueprint, then fill the `sync: false`
+# secrets in the dashboard.
+services:
+  - type: web
+    name: productive
+    runtime: docker
+    plan: free
+    region: oregon
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    healthCheckPath: /health
+    autoDeployTrigger: commit
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: SESSION_COOKIE_SECURE
+        value: "true"
+      # Fill these in the Render dashboard (secrets / URL-dependent):
+      - key: SERVER_URL # https://<your-app>.onrender.com
+        sync: false
+      - key: WEB_URL # same as SERVER_URL (single origin)
+        sync: false
+      - key: DATABASE_URL # Supabase SESSION-pooler URL (port 5432) + ?sslmode=require
+        sync: false
+      - key: ENCRYPTION_KEY # 64 hex chars
+        sync: false
+      - key: GOOGLE_CLIENT_ID
+        sync: false
+      - key: GOOGLE_CLIENT_SECRET
+        sync: false
+      - key: GOOGLE_OAUTH_REDIRECT_URI # https://<your-app>.onrender.com/auth/google/callback
+        sync: false
+      - key: GOOGLE_DRIVE_REDIRECT_URI # https://<your-app>.onrender.com/auth/google/drive/callback
+        sync: false
