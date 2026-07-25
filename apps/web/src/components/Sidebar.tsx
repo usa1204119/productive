@@ -91,7 +91,7 @@ export function Sidebar() {
             <>
               <p>
                 This removes the workspace and its boards, tasks and document records from
-                Plane and Curves.
+                Swift Productive.
               </p>
               <p className="mt-2 font-medium text-slate-700">
                 Your files in Google Drive are not deleted — only the references here are

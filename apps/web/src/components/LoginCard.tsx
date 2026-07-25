@@ -9,7 +9,7 @@ export function LoginCard() {
   return (
     <div className="flex min-h-full items-center justify-center p-6">
       <div className="w-full max-w-sm rounded-2xl bg-white p-8 shadow-sm">
-        <h1 className="text-xl font-semibold tracking-tight">Plane and Curves</h1>
+        <h1 className="text-xl font-semibold tracking-tight">Swift Productive</h1>
         <p className="mt-1 text-sm text-slate-500">Plan it. Do it. Keep it together.</p>
 
         {banner && (

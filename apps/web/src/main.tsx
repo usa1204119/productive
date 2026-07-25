@@ -1,3 +1,8 @@
+// Excalidraw (and some deps) read `process.env` at runtime in the browser.
+// In a production bundle `process` is undefined -> ReferenceError -> crash.
+// Shim it before anything (including the lazy Excalidraw chunk) loads.
+(globalThis as unknown as { process?: { env: Record<string, string> } }).process ??= { env: {} };
+
 import React from "react";
 import ReactDOM from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";

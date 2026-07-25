@@ -4,7 +4,7 @@ import { type DocumentDto, MAX_UPLOAD_BYTES } from "@plane-and-curves/shared";
 import { AppError } from "../errors.js";
 import type { DriveClient } from "./driveClient.js";
 
-const ROOT_FOLDER_NAME = "Plane and Curves";
+const ROOT_FOLDER_NAME = "Swift Productive";
 const ROOT_PROPERTY = { key: "pacRoot", value: "v1" } as const;
 const FOLDER_CHECK_CONCURRENCY = 5;
 

@@ -63,11 +63,15 @@ export function WorkspaceView({
 
   return (
     <div className="flex h-full flex-col">
-      <header className="flex items-center gap-4 border-b border-slate-200 px-6">
-        <h1 className="shrink-0 truncate py-2.5 text-sm font-semibold text-slate-800">
+      <header className="flex flex-col items-center gap-2.5 border-b border-slate-200 px-6 py-3">
+        <h1 className="max-w-full truncate text-base font-semibold text-slate-800">
           {workspace.name}
         </h1>
-        <div className="flex gap-5" role="tablist" aria-label="Workspace sections">
+        <div
+          role="tablist"
+          aria-label="Workspace sections"
+          className="inline-flex rounded-xl border border-slate-200 bg-slate-100 p-1"
+        >
           {TABS.map((t) => (
             <button
               key={t.id}
@@ -76,10 +80,10 @@ export function WorkspaceView({
               aria-selected={tab === t.id}
               aria-controls={`workspace-panel-${t.id}`}
               onClick={() => choose(t.id)}
-              className={`-mb-px border-b-2 py-2.5 text-sm font-medium transition ${
+              className={`rounded-lg px-4 py-1.5 text-sm font-medium transition ${
                 tab === t.id
-                  ? "border-accent text-accent"
-                  : "border-transparent text-slate-500 hover:text-slate-700"
+                  ? "bg-white text-accent shadow-sm"
+                  : "text-slate-500 hover:text-slate-700"
               }`}
             >
               {t.label}

@@ -25,7 +25,7 @@ export function TopBar({ user, sidebarOpen, onToggleSidebar }: TopBarProps) {
           <Menu className="h-5 w-5" />
         </button>
         <span className="text-sm font-semibold tracking-tight text-slate-700">
-          Plane and Curves
+          Swift Productive
         </span>
       </div>
 

@@ -208,7 +208,7 @@ export function DocumentsTab({
     return (
       <DriveGate
         title="Connect Google Drive"
-        description="Plane and Curves requests only drive.file access, so it can access files you upload here—not the rest of your Drive."
+        description="Swift Productive requests only drive.file access, so it can access files you upload here—not the rest of your Drive."
         action="Connect Google Drive"
         onAction={googleDriveConnect}
         error={oauthBanner?.kind === "error" ? oauthBanner.message : undefined}
@@ -461,7 +461,7 @@ export function DocumentsTab({
           body={
             <div className="space-y-3">
               <p>
-                This removes the document from Plane and Curves. The Google Drive
+                This removes the document from Swift Productive. The Google Drive
                 file is kept by default.
               </p>
               {!removeTarget.missing && (
@@ -477,7 +477,7 @@ export function DocumentsTab({
                   <span>
                     Also delete the file from Google Drive
                     <span className="mt-0.5 block text-xs text-slate-400">
-                      This cannot be undone from Plane and Curves.
+                      This cannot be undone from Swift Productive.
                     </span>
                   </span>
                 </label>
@@ -551,7 +551,7 @@ function DriveGate({
           {action}
         </button>
         <p className="mt-4 text-xs leading-5 text-slate-400">
-          Plane and Curves never stores file bytes and never requests access to
+          Swift Productive never stores file bytes and never requests access to
           your whole Drive.
         </p>
       </div>

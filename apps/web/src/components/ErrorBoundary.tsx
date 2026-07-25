@@ -48,6 +48,11 @@ export class ErrorBoundary extends Component<Props, State> {
             <p className="mt-2 text-sm text-slate-500">
               The app hit an unexpected error. Reloading usually fixes it.
             </p>
+            {this.state.error.message && (
+              <p className="mt-3 max-h-24 overflow-auto rounded-lg bg-slate-50 px-3 py-2 text-left font-mono text-[11px] leading-snug text-slate-400">
+                {this.state.error.message}
+              </p>
+            )}
             <button
               onClick={this.reload}
               className="mt-5 rounded-lg bg-accent px-4 py-2 text-sm font-medium text-white transition hover:bg-accent-hover"
