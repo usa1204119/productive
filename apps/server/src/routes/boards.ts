@@ -81,11 +81,15 @@ boardsRouter.put(
   validateBody(saveSceneSchema),
   async (req, res, next) => {
     try {
-      const { elements, appState } = req.body as {
+      const { elements, appState, files } = req.body as {
         elements: unknown[];
         appState: Record<string, unknown>;
+        files?: Record<string, unknown>;
       };
-      ok(res, await saveScene(prisma, req.workspace!.id, req.params.boardId!, elements, appState));
+      ok(
+        res,
+        await saveScene(prisma, req.workspace!.id, req.params.boardId!, elements, appState, files),
+      );
     } catch (err) {
       next(err);
     }

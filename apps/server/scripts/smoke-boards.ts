@@ -77,7 +77,10 @@ async function main(): Promise<void> {
     { id: "e2", type: "text", text: "héllo 🌍", boundElements: null },
   ];
   const appState = { viewBackgroundColor: "#ffffff", unknownAppField: 42, gridSize: null, zoom: { value: 1 } };
-  await saveScene(prisma, ws.id, board.id, elements, appState);
+  const files = {
+    "file-abc": { id: "file-abc", mimeType: "image/png", dataURL: "data:image/png;base64,iVBORw0KGgo=" },
+  };
+  await saveScene(prisma, ws.id, board.id, elements, appState, files);
   const full = await getBoard(prisma, ws.id, board.id);
   check(
     "elements returned exactly as stored",
@@ -86,6 +89,10 @@ async function main(): Promise<void> {
   check(
     "appState returned exactly as stored",
     JSON.stringify(full.appState) === JSON.stringify(appState),
+  );
+  check(
+    "image files (data URLs) returned exactly as stored",
+    JSON.stringify(full.files) === JSON.stringify(files),
   );
 
   console.log("\nRename:");

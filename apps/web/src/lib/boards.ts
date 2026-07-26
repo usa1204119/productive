@@ -57,7 +57,11 @@ export function useDeleteBoard(workspaceId: string) {
 export function saveBoardScene(
   workspaceId: string,
   boardId: string,
-  scene: { elements: readonly unknown[]; appState: Record<string, unknown> },
+  scene: {
+    elements: readonly unknown[];
+    appState: Record<string, unknown>;
+    files?: Record<string, unknown>;
+  },
 ): Promise<unknown> {
   return api(`/workspaces/${workspaceId}/boards/${boardId}/scene`, {
     method: "PUT",

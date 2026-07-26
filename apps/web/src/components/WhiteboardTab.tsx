@@ -230,15 +230,17 @@ function BoardCanvas({
         initialData={{
           elements: Array.isArray(board.elements) ? (board.elements as never) : ([] as never),
           appState: sanitizeAppState(board.appState as Record<string, unknown>) as never,
+          files: (board.files ?? {}) as never,
           scrollToContent: true,
         }}
-        onChange={(elements, appState) => {
+        onChange={(elements, appState, files) => {
           const count = Object.keys(appState.selectedElementIds ?? {}).length;
           setSelectedCount((prev) => (prev === count ? prev : count));
           if (!primed.current) return; // ignore the initial restore emit
           saver.schedule({
             elements: elements as readonly unknown[],
             appState: sanitizeAppState(appState as unknown as Record<string, unknown>),
+            files: (files ?? {}) as Record<string, unknown>,
           });
         }}
       />

@@ -22,6 +22,7 @@ export function toBoardDto(b: Board): BoardDto {
     // Returned exactly as stored — no transformation.
     elements: b.elements as unknown as unknown[],
     appState: b.appState as unknown as Record<string, unknown>,
+    files: (b.files ?? {}) as unknown as Record<string, unknown>,
     updatedAt: b.updatedAt.toISOString(),
   };
 }
@@ -58,7 +59,7 @@ export function createBoard(
   name: string,
 ): Promise<Board> {
   return db.board.create({
-    data: { workspaceId, name, elements: [], appState: {} },
+    data: { workspaceId, name, elements: [], appState: {}, files: {} },
   });
 }
 
@@ -88,10 +89,11 @@ export async function saveScene(
   boardId: string,
   elements: unknown[],
   appState: Record<string, unknown>,
+  files: Record<string, unknown> = {},
 ): Promise<BoardSummaryDto> {
   const result = await db.board.updateMany({
     where: { id: boardId, workspaceId },
-    data: { elements: elements as Json, appState: appState as Json },
+    data: { elements: elements as Json, appState: appState as Json, files: files as Json },
   });
   if (result.count === 0) throw boardNotFound();
   const board = await db.board.findFirstOrThrow({

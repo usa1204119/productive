@@ -113,6 +113,10 @@ model Board {
   // normalisation this exists to avoid.
   elements    Json     @db.Json // Excalidraw elements — persisted exactly as received
   appState    Json     @db.Json // Excalidraw appState — persisted exactly as received
+  // Excalidraw image binaries (data URLs), keyed by fileId. Images live here, not
+  // in `elements` (which only reference a fileId) — without this they render as
+  // broken placeholders after reload. Nullable so existing rows migrate cleanly.
+  files       Json?    @db.Json
   updatedAt   DateTime @updatedAt @db.Timestamptz(3)
 
   workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)

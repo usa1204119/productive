@@ -19,6 +19,8 @@ export type SaveStatus = "idle" | "dirty" | "saving" | "saved" | "error";
 export interface Scene {
   elements: readonly unknown[];
   appState: Record<string, unknown>;
+  /** Excalidraw image binaries (data URLs) keyed by fileId. */
+  files?: Record<string, unknown>;
 }
 
 export interface SceneSaverOptions {
