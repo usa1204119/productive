@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type {
   AssignableWorkspaceRole,
+  CreatedInvitationDto,
   InvitationPreviewDto,
   WorkspaceInvitationDto,
   WorkspaceMemberDto,
@@ -39,7 +40,7 @@ export function useInviteMember(workspaceId: string) {
   const refresh = useRefreshSharing(workspaceId);
   return useMutation({
     mutationFn: (input: { email: string; role: AssignableWorkspaceRole }) =>
-      api<WorkspaceInvitationDto>(`/workspaces/${workspaceId}/invitations`, {
+      api<CreatedInvitationDto>(`/workspaces/${workspaceId}/invitations`, {
         method: "POST",
         body: JSON.stringify(input),
       }),
@@ -51,7 +52,7 @@ export function useResendInvitation(workspaceId: string) {
   const refresh = useRefreshSharing(workspaceId);
   return useMutation({
     mutationFn: (invitationId: string) =>
-      api<WorkspaceInvitationDto>(`/workspaces/${workspaceId}/invitations/${invitationId}/resend`, { method: "POST" }),
+      api<CreatedInvitationDto>(`/workspaces/${workspaceId}/invitations/${invitationId}/resend`, { method: "POST" }),
     onSuccess: refresh,
   });
 }

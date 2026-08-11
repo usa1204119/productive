@@ -26,6 +26,18 @@ export const workspaceInvitationDtoSchema = z.object({
 });
 export type WorkspaceInvitationDto = z.infer<typeof workspaceInvitationDtoSchema>;
 
+/**
+ * Returned when an invitation is created (or resent). Carries the shareable
+ * `inviteUrl` (only available at creation time — the token is never stored in
+ * the clear) so the inviter can copy the link even if the email couldn't be
+ * delivered. `emailDelivered` reflects whether the invite email actually sent.
+ */
+export const createdInvitationDtoSchema = workspaceInvitationDtoSchema.extend({
+  inviteUrl: z.string(),
+  emailDelivered: z.boolean(),
+});
+export type CreatedInvitationDto = z.infer<typeof createdInvitationDtoSchema>;
+
 export const invitationPreviewDtoSchema = z.object({
   workspaceName: z.string(),
   inviterName: z.string(),

@@ -82,6 +82,8 @@ async function main(): Promise<void> {
   memoryMailbox.clear();
   const invitation = await inv.createInvitation(prisma, mail, ws.id, owner, "alice@example.com", "EDITOR");
   check("invitation created for the invitee (masked email)", invitation.role === "EDITOR");
+  check("create returns a shareable invite link", invitation.inviteUrl.includes("/invite/"));
+  check("email delivered via the memory mailer", invitation.emailDelivered === true);
   check("exactly one email was sent", memoryMailbox.all().length === 1);
   check("email targets the invitee", memoryMailbox.all()[0]!.to === "alice@example.com");
   check("token is not stored in plaintext", (await prisma.workspaceInvitation.findFirst())!.tokenHash !== lastToken());
@@ -162,6 +164,23 @@ async function main(): Promise<void> {
   check("accepting into a Drive workspace enqueues a GRANT job", jobs.length === 1 && jobs[0]!.action === "GRANT");
   const noDriveJobs = await prisma.driveAclSyncJob.findMany({ where: { workspaceId: ws.id } });
   check("non-Drive workspace enqueues no ACL jobs", noDriveJobs.length === 0);
+
+  console.log("\nEmail failure keeps the invite (copy-link fallback):");
+  const failMail = {
+    sendWorkspaceInvitation: async () => {
+      throw new Error("resend 403: recipient not allowed");
+    },
+  };
+  const fbWs = await createWorkspace(prisma, owner.id, "Fallback");
+  const created2 = await inv.createInvitation(prisma, failMail, fbWs.id, owner, "eve@example.com", "VIEWER");
+  check("invite still created when email fails", created2.inviteUrl.includes("/invite/"));
+  check("emailDelivered reported false", created2.emailDelivered === false);
+  check("invitation still pending (not rolled back)", (await inv.listPendingInvitations(prisma, fbWs.id)).length === 1);
+  const eve = await google("eve@example.com", "Eve");
+  const eveToken = created2.inviteUrl.split("/invite/")[1]!;
+  const acceptedViaLink = await inv.acceptInvitation(prisma, eveToken, eve);
+  check("the copy-link accepts successfully", acceptedViaLink.workspaceId === fbWs.id);
+  check("invitee gains access via the link", (await getWorkspaceAccess(prisma, eve.id, fbWs.id))?.role === "VIEWER");
 
   console.log("\nAudit trail:");
   const audit = await prisma.workspaceAuditLog.findMany({ where: { workspaceId: ws.id } });

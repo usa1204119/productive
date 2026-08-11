@@ -2,11 +2,13 @@ import { createHash, randomBytes } from "node:crypto";
 import { Prisma, type PrismaClient, type User, type WorkspaceRole } from "@prisma/client";
 import type {
   AssignableWorkspaceRole,
+  CreatedInvitationDto,
   InvitationPreviewDto,
   WorkspaceInvitationDto,
 } from "@plane-and-curves/shared";
 import { env } from "../../env.js";
 import { AppError } from "../../errors.js";
+import { logger } from "../../logger.js";
 import type { MailProvider } from "../mail/types.js";
 
 export const normalizeEmail = (email: string): string => email.trim().toLowerCase();
@@ -82,7 +84,7 @@ export async function createInvitation(
   actor: User,
   email: string,
   role: AssignableWorkspaceRole,
-): Promise<WorkspaceInvitationDto> {
+): Promise<CreatedInvitationDto> {
   sharingRequired();
   if (actor.isGuest || !actor.email) {
     throw new AppError(403, "GUEST_FORBIDDEN", "Sign in with Google before inviting members");
@@ -124,19 +126,32 @@ export async function createInvitation(
     throw error;
   }
 
+  // Email is best-effort: if it can't be delivered (e.g. Resend restricts the
+  // recipient, or no domain is verified), keep the invitation anyway so the
+  // inviter can copy the link and share it manually.
+  let emailDelivered = true;
   try {
     await deliver(mail, rawToken, invitation);
   } catch (error) {
-    await db.workspaceInvitation.update({
-      where: { id: invitation.id },
-      data: { revokedAt: new Date() },
-    });
-    throw error;
+    emailDelivered = false;
+    logger.warn(
+      { err: error, workspaceId },
+      "Invitation email not delivered; invitation kept for its shareable link",
+    );
   }
   await db.workspaceAuditLog.create({
-    data: { workspaceId, actorUserId: actor.id, action: "invitation.created", metadata: { role } },
+    data: {
+      workspaceId,
+      actorUserId: actor.id,
+      action: "invitation.created",
+      metadata: { role, emailDelivered },
+    },
   });
-  return toDto(invitation);
+  return {
+    ...toDto(invitation),
+    inviteUrl: `${env.WEB_URL}/invite/${rawToken}`,
+    emailDelivered,
+  };
 }
 
 export async function revokeInvitation(
@@ -162,7 +177,7 @@ export async function resendInvitation(
   workspaceId: string,
   invitationId: string,
   actor: User,
-): Promise<WorkspaceInvitationDto> {
+): Promise<CreatedInvitationDto> {
   const old = await db.workspaceInvitation.findFirst({
     where: { id: invitationId, workspaceId, acceptedAt: null, revokedAt: null },
   });
