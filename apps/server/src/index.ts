@@ -73,10 +73,15 @@ app.post("/workspaces/:workspaceId/documents", uploadRateLimit);
 
 app.use("/auth", authRouter);
 app.use("/workspaces", workspacesRouter);
-app.use("/workspaces/:workspaceId", membersRouter);
+// Specific sub-routers MUST be registered before membersRouter. membersRouter is
+// mounted on the broad "/workspaces/:workspaceId" prefix and applies an
+// owner-only guard at the router level (requireWorkspaceOwner); if it were
+// registered first, that guard would run for /boards, /tasks and /documents too
+// and 403 every non-owner member before their request reached the right router.
 app.use("/workspaces/:workspaceId/boards", boardsRouter);
 app.use("/workspaces/:workspaceId/tasks", tasksRouter);
 app.use("/workspaces/:workspaceId/documents", documentsRouter);
+app.use("/workspaces/:workspaceId", membersRouter);
 app.use("/workspace-invitations", invitationsRouter);
 
 if (env.NODE_ENV === "test" && env.E2E_TEST_MODE) {
