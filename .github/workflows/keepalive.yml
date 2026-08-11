@@ -1,19 +1,24 @@
 name: keep-render-warm
 
-# Pings the free-tier Render service so it does not spin down (~15 min idle),
-# which otherwise causes cold-start 502s and the "No slides yet" flash on load.
-# GitHub's scheduler is best-effort and often runs a few minutes late, so this
-# is a backup — a dedicated uptime monitor (UptimeRobot / cron-job.org) hitting
-# the same /health URL every 10 min is more reliable.
+# Backup wake-up for the free-tier Render service. The PRIMARY keep-warm is the
+# server's own self-ping (apps/server/src/index.ts, every 10 min) which reliably
+# resets the idle timer while the instance is running. This workflow only needs
+# to WAKE the instance if it ever fully slept (a deploy gap, a crash). GitHub's
+# scheduler is best-effort and often runs late, so each run also loops a few
+# pings ~60s apart to widen the coverage window.
 
 on:
   schedule:
-    - cron: "*/10 * * * *"
+    - cron: "*/5 * * * *"
   workflow_dispatch: {}
 
 jobs:
   ping:
     runs-on: ubuntu-latest
     steps:
-      - name: Ping /health
-        run: curl -fsS --max-time 30 https://productive-kel1.onrender.com/health
+      - name: Ping /health repeatedly
+        run: |
+          for i in 1 2 3 4 5; do
+            curl -fsS --max-time 40 https://productive-kel1.onrender.com/health || echo "ping $i failed"
+            [ "$i" -lt 5 ] && sleep 60
+          done

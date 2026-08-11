@@ -94,6 +94,26 @@ if (isProd) serveWeb(app);
 app.use(notFoundHandler);
 app.use(errorHandler);
 
+/**
+ * Free-tier hosts (Render) spin the instance down after ~15 min with no inbound
+ * traffic, causing cold-start 502s and the "content not loaded" flash. Self-ping
+ * our own PUBLIC url every 10 min so the idle timer keeps resetting. It must hit
+ * the public URL (SERVER_URL), not localhost, so the request routes back through
+ * the host and counts as inbound. Disable with KEEP_WARM=false. No-op outside
+ * production (dev/test/e2e don't idle and shouldn't self-call).
+ */
+function startKeepWarm(): (() => void) | null {
+  if (!isProd || process.env.KEEP_WARM === "false") return null;
+  const url = `${env.SERVER_URL.replace(/\/+$/, "")}/health`;
+  const intervalMs = 10 * 60_000; // 10 min < Render's ~15 min idle window
+  const timer = setInterval(() => {
+    fetch(url).catch((err: unknown) => logger.warn({ err }, "keep-warm ping failed"));
+  }, intervalMs);
+  timer.unref();
+  logger.info({ url }, "Keep-warm self-ping enabled (every 10 min)");
+  return () => clearInterval(timer);
+}
+
 async function start(): Promise<void> {
   await initDb();
   if (process.env.USE_PGLITE === "true") {
@@ -110,12 +130,14 @@ async function start(): Promise<void> {
     logger.error({ err: error }, "Collaboration server failed to start; continuing without live sync");
   }
   startDriveAclWorker();
+  const stopKeepWarm = startKeepWarm();
   let shuttingDown = false;
 
   const shutdown = async (signal: string): Promise<void> => {
     if (shuttingDown) return;
     shuttingDown = true;
     logger.info({ signal }, "Graceful shutdown started");
+    stopKeepWarm?.();
     stopDriveAclWorker();
     const forceTimer = setTimeout(() => {
       logger.error("Graceful shutdown timed out");
