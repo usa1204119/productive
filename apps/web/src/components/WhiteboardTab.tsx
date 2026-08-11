@@ -626,13 +626,12 @@ function BoardCanvas({ workspaceId, boardId, canEdit, active, focus, onFocusHand
             appState: sanitizeAppState(appState as unknown as Record<string, unknown>),
             files: (files ?? {}) as Record<string, unknown>,
           };
-          // Broadcast to peers (fast, ephemeral) AND persist our own edits. Every
-          // editor persists; the server merges by element version, so concurrent
-          // saves converge with no lost work and no conflict dialog.
-          live.broadcastScene(
-            elements as readonly never[],
-            (files ?? {}) as Record<string, unknown>,
-          );
+          // Broadcast element deltas to peers (fast, ephemeral) AND persist our own
+          // edits. Every editor persists; the server merges by element version, so
+          // concurrent saves converge with no lost work and no conflict dialog.
+          // Image binaries travel via the durable store, not the socket (peers pull
+          // them in boardSync), so only elements are broadcast here.
+          live.broadcastScene(elements as readonly never[]);
           saver.schedule(scene);
           // Keep the board's query cache current with the latest EDIT (throttled,
           // trailing), independent of the async/debounced save — so remounting this

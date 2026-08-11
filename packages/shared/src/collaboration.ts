@@ -76,16 +76,6 @@ export interface BoardUpdateMessage {
   senderId: string;
 }
 
-/** Client -> server / server -> client: newly-added image files (by id). */
-export const boardFilesInputSchema = z.object({
-  boardId: z.string().min(1),
-  files: z.record(z.unknown()),
-});
-export interface BoardFilesMessage {
-  boardId: string;
-  files: Record<string, unknown>;
-}
-
 /** Client -> server: live pointer (scene coords) + current selection. */
 export const boardCursorInputSchema = z.object({
   boardId: z.string().min(1),

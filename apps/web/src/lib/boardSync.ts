@@ -2,19 +2,22 @@ import { useEffect, useRef } from "react";
 import type {
   BoardCursorGoneMessage,
   BoardCursorMessage,
-  BoardFilesMessage,
   BoardUpdateMessage,
 } from "@plane-and-curves/shared";
 import { socket } from "./collaboration.js";
+import { api } from "./api.js";
 import { reconcileElements, type Versioned } from "./reconcile.js";
 
 /** The slice of the Excalidraw imperative API this hook touches. */
 interface SceneApi {
   getSceneElements: () => readonly Versioned[];
   getSceneElementsIncludingDeleted?: () => readonly Versioned[];
+  getFiles?: () => Record<string, unknown>;
   updateScene: (scene: { elements?: readonly unknown[]; collaborators?: Map<string, unknown> }) => void;
   addFiles: (files: unknown[]) => void;
 }
+
+type StoredFile = { id: string } & Record<string, unknown>;
 
 const CURSOR_COLORS = ["#ef4444", "#f59e0b", "#10b981", "#3b82f6", "#8b5cf6", "#ec4899", "#14b8a6", "#f97316"];
 function colorFor(key: string): { background: string; stroke: string } {
@@ -25,11 +28,15 @@ function colorFor(key: string): { background: string; stroke: string } {
 }
 
 /**
- * Live co-editing for one open board. Broadcasts local element deltas + cursor
- * to peers (throttled), reconciles inbound deltas into the scene without
- * disturbing the local viewport/selection, renders peer cursors, and gates
- * persistence to the server-elected "leader" so N editors never fight the board
- * revision. Falls back to normal local persistence when the socket is offline.
+ * Live co-editing for one open board. Broadcasts local element deltas + cursor to
+ * peers (throttled), reconciles inbound deltas into the scene without disturbing
+ * the local viewport/selection, and renders peer cursors.
+ *
+ * Image binaries are NOT sent over the socket (they blow past the frame limit and
+ * would broadcast MBs to every peer). Instead, when an inbound element references
+ * a file this peer doesn't have, we pull it from the durable store
+ * (GET …/boards/:id/files, which the adder's save persists) and inject it into the
+ * live canvas — retried briefly to cover the gap until that save lands.
  */
 export function useBoardLiveSync(params: {
   workspaceId: string;
@@ -49,9 +56,10 @@ export function useBoardLiveSync(params: {
   const collaborators = useRef(new Map<string, unknown>());
 
   const sceneTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const pendingScene = useRef<{ elements: readonly Versioned[]; files: Record<string, unknown> } | null>(null);
+  const pendingScene = useRef<readonly Versioned[] | null>(null);
   const cursorTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pendingCursor = useRef<{ x: number | null; y: number | null; selectedIds: string[] } | null>(null);
+  const fileRetryTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     if (!boardId) return;
@@ -68,6 +76,39 @@ export function useBoardLiveSync(params: {
     const applyCollaborators = () =>
       getApi.current()?.updateScene({ collaborators: new Map(collaborators.current) as never });
 
+    // Pull image binaries a synced element references but we don't have yet.
+    const fetchMissingFiles = (attempt = 0) => {
+      const ex = getApi.current();
+      if (!ex?.getFiles) return;
+      const have = new Set(Object.keys(ex.getFiles()));
+      const referenced = new Set<string>();
+      for (const el of ex.getSceneElements() as ReadonlyArray<{ fileId?: string | null }>) {
+        if (el.fileId) referenced.add(el.fileId);
+      }
+      const missing = [...referenced].filter((id) => !have.has(id) && !knownFiles.current.has(id));
+      if (missing.length === 0) return;
+
+      const retry = () => {
+        if (attempt >= 5) return;
+        if (fileRetryTimer.current) clearTimeout(fileRetryTimer.current);
+        fileRetryTimer.current = setTimeout(() => fetchMissingFiles(attempt + 1), Math.min(1000 * 2 ** attempt, 8000));
+      };
+
+      void api<Record<string, StoredFile>>(`/workspaces/${workspaceId}/boards/${boardId}/files`)
+        .then((files) => {
+          const ex2 = getApi.current();
+          if (!ex2) return;
+          const toAdd = missing.map((id) => files[id]).filter((f): f is StoredFile => Boolean(f));
+          if (toAdd.length) {
+            ex2.addFiles(toAdd);
+            for (const f of toAdd) knownFiles.current.add(f.id);
+          }
+          // Some may not be persisted yet (adder's save is debounced) — retry.
+          if (missing.some((id) => !files[id])) retry();
+        })
+        .catch(retry);
+    };
+
     const onUpdate = (msg: BoardUpdateMessage) => {
       if (msg.boardId !== boardId) return;
       const api = getApi.current();
@@ -77,14 +118,7 @@ export function useBoardLiveSync(params: {
       }
       const base = (api.getSceneElementsIncludingDeleted?.() ?? api.getSceneElements()) as Versioned[];
       api.updateScene({ elements: reconcileElements(base, msg.elements as Versioned[]) as never });
-    };
-    const onFiles = (msg: BoardFilesMessage) => {
-      if (msg.boardId !== boardId) return;
-      const api = getApi.current();
-      if (!api) return;
-      const values = Object.values(msg.files ?? {});
-      if (values.length) api.addFiles(values);
-      for (const id of Object.keys(msg.files ?? {})) knownFiles.current.add(id);
+      fetchMissingFiles();
     };
     const onCursor = (msg: BoardCursorMessage) => {
       if (msg.boardId !== boardId) return;
@@ -104,7 +138,6 @@ export function useBoardLiveSync(params: {
     };
 
     socket.on("board:update", onUpdate);
-    socket.on("board:files", onFiles);
     socket.on("board:cursor", onCursor);
     socket.on("board:cursor-gone", onCursorGone);
     socket.on("connect", subscribe);
@@ -113,13 +146,13 @@ export function useBoardLiveSync(params: {
     return () => {
       if (socket.connected) socket.emit("board:unsubscribe", { boardId });
       socket.off("board:update", onUpdate);
-      socket.off("board:files", onFiles);
       socket.off("board:cursor", onCursor);
       socket.off("board:cursor-gone", onCursorGone);
       socket.off("connect", subscribe);
       if (sceneTimer.current) clearTimeout(sceneTimer.current);
       if (cursorTimer.current) clearTimeout(cursorTimer.current);
-      sceneTimer.current = cursorTimer.current = null;
+      if (fileRetryTimer.current) clearTimeout(fileRetryTimer.current);
+      sceneTimer.current = cursorTimer.current = fileRetryTimer.current = null;
       pendingScene.current = pendingCursor.current = null;
       state.current = { subscribed: false };
     };
@@ -127,12 +160,12 @@ export function useBoardLiveSync(params: {
 
   const flushScene = () => {
     sceneTimer.current = null;
-    const snap = pendingScene.current;
+    const elements = pendingScene.current;
     pendingScene.current = null;
-    if (!snap || !state.current.subscribed || !canEditRef.current) return;
+    if (!elements || !state.current.subscribed || !canEditRef.current) return;
 
     const changed: Versioned[] = [];
-    for (const el of snap.elements) {
+    for (const el of elements) {
       if (typeof el.version !== "number") continue;
       const last = lastVersions.current.get(el.id);
       if (last === undefined || el.version > last) {
@@ -141,17 +174,6 @@ export function useBoardLiveSync(params: {
       }
     }
     if (changed.length) socket.emit("board:update", { boardId, elements: changed });
-
-    const newFiles: Record<string, unknown> = {};
-    let hasNew = false;
-    for (const [id, file] of Object.entries(snap.files ?? {})) {
-      if (!knownFiles.current.has(id)) {
-        newFiles[id] = file;
-        knownFiles.current.add(id);
-        hasNew = true;
-      }
-    }
-    if (hasNew) socket.emit("board:files", { boardId, files: newFiles });
   };
 
   const flushCursor = () => {
@@ -170,9 +192,9 @@ export function useBoardLiveSync(params: {
       for (const el of elements) if (typeof el.version === "number") map.set(el.id, el.version);
       lastVersions.current = map;
     },
-    broadcastScene: (elements: readonly Versioned[], files: Record<string, unknown>) => {
+    broadcastScene: (elements: readonly Versioned[]) => {
       if (!state.current.subscribed || !canEditRef.current) return;
-      pendingScene.current = { elements, files };
+      pendingScene.current = elements;
       if (!sceneTimer.current) sceneTimer.current = setTimeout(flushScene, 60);
     },
     broadcastPointer: (x: number | null, y: number | null, selectedIds: string[]) => {

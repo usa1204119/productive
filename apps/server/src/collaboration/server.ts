@@ -4,7 +4,6 @@ import { createAdapter } from "@socket.io/redis-adapter";
 import { createClient, type RedisClientType } from "redis";
 import {
   boardCursorInputSchema,
-  boardFilesInputSchema,
   boardSubscribeSchema,
   boardUnsubscribeSchema,
   boardUpdateInputSchema,
@@ -82,7 +81,10 @@ export async function createCollaborationServer(httpServer: HttpServer): Promise
   const io = new SocketServer(httpServer, {
     path: "/socket.io",
     cors: { origin: allowedOrigins, credentials: true },
-    maxHttpBufferSize: 64 * 1024,
+    // Only element deltas + cursors cross the socket now (image binaries go via
+    // the durable store). 1 MB comfortably covers bulk element ops (paste/move of
+    // many elements) while staying far below multi-MB image payloads.
+    maxHttpBufferSize: 1024 * 1024,
     transports: ["websocket", "polling"],
   });
 
@@ -192,14 +194,6 @@ export async function createCollaborationServer(httpServer: HttpServer): Promise
       const { boardId, elements } = parsed.data;
       if (!(socket.data.canEditBoard as Set<string> | undefined)?.has(boardId)) return;
       socket.to(`board:${boardId}`).emit("board:update", { boardId, elements, senderId: socket.id });
-    });
-
-    socket.on("board:files", (raw: unknown) => {
-      const parsed = boardFilesInputSchema.safeParse(raw);
-      if (!parsed.success) return;
-      const { boardId, files } = parsed.data;
-      if (!(socket.data.canEditBoard as Set<string> | undefined)?.has(boardId)) return;
-      socket.to(`board:${boardId}`).emit("board:files", { boardId, files });
     });
 
     socket.on("board:cursor", (raw: unknown) => {

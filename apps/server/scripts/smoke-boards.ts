@@ -55,7 +55,7 @@ async function main(): Promise<void> {
 
   const { createGuestUser } = await import("../src/lib/users.js");
   const { listWorkspaces, createWorkspace } = await import("../src/lib/workspaces.js");
-  const { createBoard, listBoards, getBoard, renameBoard, saveScene, deleteBoard, reorderBoard } =
+  const { createBoard, listBoards, getBoard, getBoardFiles, renameBoard, saveScene, deleteBoard, reorderBoard } =
     await import("../src/lib/boards.js");
 
   const alice = await createGuestUser(prisma);
@@ -94,6 +94,10 @@ async function main(): Promise<void> {
   check(
     "image files (data URLs) returned exactly as stored",
     JSON.stringify(full.files) === JSON.stringify(files),
+  );
+  check(
+    "getBoardFiles returns just the stored image binaries",
+    JSON.stringify(await getBoardFiles(prisma, ws.id, board.id)) === JSON.stringify(files),
   );
 
   console.log("\nConcurrent saves MERGE by element version (no lost work, no conflict):");

@@ -16,6 +16,7 @@ import {
   createBoard,
   deleteBoard,
   getBoard,
+  getBoardFiles,
   listBoards,
   renameBoard,
   reorderBoard,
@@ -58,6 +59,19 @@ boardsRouter.get("/:boardId", validateParams(boardParamsSchema), async (req, res
   try {
     const board = await getBoard(prisma, req.workspace!.id, req.params.boardId!);
     ok(res, toBoardDto(board));
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * Just a board's image binaries (keyed by fileId). Peers fetch these after an
+ * image element syncs live, since the binaries are too large for the socket.
+ * Read access (viewers included) — no EDITOR gate.
+ */
+boardsRouter.get("/:boardId/files", validateParams(boardParamsSchema), async (req, res, next) => {
+  try {
+    ok(res, await getBoardFiles(prisma, req.workspace!.id, req.params.boardId!));
   } catch (err) {
     next(err);
   }

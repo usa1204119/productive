@@ -135,6 +135,11 @@ async function main(): Promise<void> {
     const mm = await get(`/workspaces/${ws.id}/members`, memberCookie);
     check("member GET /members is 403", mm.status === 403 && mm.body?.error?.code === "FORBIDDEN");
 
+    console.log("\nBoard image files follow board read access:");
+    check("member GET /boards/:id/files is 200", (await get(`/workspaces/${ws.id}/boards/${board.id}/files`, memberCookie)).status === 200);
+    check("viewer GET /boards/:id/files is 200", (await get(`/workspaces/${ws.id}/boards/${board.id}/files`, viewerCookie)).status === 200);
+    check("stranger GET /boards/:id/files is 404", (await get(`/workspaces/${ws.id}/boards/${board.id}/files`, strangerCookie)).status === 404);
+
     console.log("\nOwner reads content; stranger and anon are denied:");
     check("owner GET /boards is 200", (await get(`/workspaces/${ws.id}/boards`, ownerCookie)).status === 200);
     check("stranger GET /boards is 404", (await get(`/workspaces/${ws.id}/boards`, strangerCookie)).status === 404);

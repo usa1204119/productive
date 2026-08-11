@@ -218,6 +218,24 @@ export async function saveScene(
 }
 
 /**
+ * Return a board's stored image binaries (Excalidraw `files`, keyed by fileId).
+ * Image data is too large for the live socket, so peers pull it from here after
+ * an image element syncs. Same access as reading the board (viewers included).
+ */
+export async function getBoardFiles(
+  db: PrismaClient,
+  workspaceId: string,
+  boardId: string,
+): Promise<Record<string, unknown>> {
+  const board = await db.board.findFirst({
+    where: { id: boardId, workspaceId },
+    select: { files: true },
+  });
+  if (!board) throw boardNotFound();
+  return (board.files as Record<string, unknown> | null) ?? {};
+}
+
+/**
  * Delete a board. Per the product's delete rules this must NOT delete tasks:
  * the schema nulls Task.sourceBoardId (onDelete: SetNull); here we also null the
  * non-FK sourceElementId so no dangling element reference remains. One
