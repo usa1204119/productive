@@ -2,7 +2,14 @@ import type { Server as HttpServer } from "node:http";
 import { Server as SocketServer, type Socket } from "socket.io";
 import { createAdapter } from "@socket.io/redis-adapter";
 import { createClient, type RedisClientType } from "redis";
-import type { PresenceEntry } from "@plane-and-curves/shared";
+import {
+  boardCursorInputSchema,
+  boardFilesInputSchema,
+  boardSubscribeSchema,
+  boardUnsubscribeSchema,
+  boardUpdateInputSchema,
+  type PresenceEntry,
+} from "@plane-and-curves/shared";
 import { env } from "../env.js";
 import { logger } from "../logger.js";
 import { prisma } from "../db.js";
@@ -17,8 +24,55 @@ interface JoinPayload {
 
 const sections = new Set(["whiteboard", "tasks", "documents"]);
 const presence = new Map<string, Map<string, PresenceEntry>>();
+
+// Live whiteboard co-editing state (per board). `boardEditors` keeps the ordered
+// list of editor sockets in each board room; the first is the "save leader" that
+// persists the merged scene so N editors never fight the board revision.
+const boardEditors = new Map<string, string[]>();
+const boardLeaders = new Map<string, string>();
+
 let pubClient: RedisClientType | null = null;
 let subClient: RedisClientType | null = null;
+
+/** Recompute a board's leader and notify sockets whose leadership changed. */
+function refreshLeader(io: SocketServer, boardId: string, joiningSocketId?: string): void {
+  const newLeader = (boardEditors.get(boardId) ?? [])[0];
+  const oldLeader = boardLeaders.get(boardId);
+  if (newLeader !== oldLeader) {
+    if (oldLeader) io.to(oldLeader).emit("board:role", { boardId, isLeader: false });
+    if (newLeader) {
+      boardLeaders.set(boardId, newLeader);
+      io.to(newLeader).emit("board:role", { boardId, isLeader: true });
+    } else {
+      boardLeaders.delete(boardId);
+    }
+  }
+  // A newly-joined follower/viewer would otherwise never learn its (non-)leader
+  // status, so always tell the joiner explicitly.
+  if (joiningSocketId) {
+    io.to(joiningSocketId).emit("board:role", {
+      boardId,
+      isLeader: boardLeaders.get(boardId) === joiningSocketId,
+    });
+  }
+}
+
+/** Remove a socket from a board room, promote a new leader, and clear its cursor. */
+function leaveBoard(io: SocketServer, socket: Socket, boardId: string): void {
+  const boards = socket.data.boards as Set<string> | undefined;
+  if (!boards?.has(boardId)) return;
+  boards.delete(boardId);
+  (socket.data.canEditBoard as Set<string> | undefined)?.delete(boardId);
+  void socket.leave(`board:${boardId}`);
+  const editors = boardEditors.get(boardId);
+  if (editors) {
+    const next = editors.filter((id) => id !== socket.id);
+    if (next.length) boardEditors.set(boardId, next);
+    else boardEditors.delete(boardId);
+  }
+  socket.to(`board:${boardId}`).emit("board:cursor-gone", { boardId, socketId: socket.id });
+  refreshLeader(io, boardId);
+}
 
 function cookieValue(header: string | undefined, name: string): string | undefined {
   if (!header) return undefined;
@@ -129,7 +183,78 @@ export async function createCollaborationServer(httpServer: HttpServer): Promise
       acknowledge?.({ ok: true, role: access.role });
     });
 
-    socket.on("disconnect", () => removePresence(io, socket));
+    // --- Live whiteboard co-editing (per board room) ---------------------------
+    socket.on("board:subscribe", async (raw: unknown, ack?: (result: object) => void) => {
+      const parsed = boardSubscribeSchema.safeParse(raw);
+      if (!parsed.success) return ack?.({ ok: false });
+      const { workspaceId, boardId } = parsed.data;
+      const access = await getWorkspaceAccess(prisma, socket.data.userId as string, workspaceId);
+      if (!access) return ack?.({ ok: false });
+
+      const boards = (socket.data.boards as Set<string> | undefined) ?? new Set<string>();
+      socket.data.boards = boards;
+      if (boards.has(boardId)) return ack?.({ ok: true });
+      boards.add(boardId);
+      await socket.join(`board:${boardId}`);
+
+      const canEdit = access.role === "EDITOR" || access.role === "OWNER";
+      const canEditBoard =
+        (socket.data.canEditBoard as Set<string> | undefined) ?? new Set<string>();
+      socket.data.canEditBoard = canEditBoard;
+      if (canEdit) {
+        canEditBoard.add(boardId);
+        const editors = boardEditors.get(boardId) ?? [];
+        if (!editors.includes(socket.id)) editors.push(socket.id);
+        boardEditors.set(boardId, editors);
+      }
+      refreshLeader(io, boardId, socket.id);
+      ack?.({ ok: true, role: access.role });
+    });
+
+    socket.on("board:unsubscribe", (raw: unknown) => {
+      const parsed = boardUnsubscribeSchema.safeParse(raw);
+      if (parsed.success) leaveBoard(io, socket, parsed.data.boardId);
+    });
+
+    socket.on("board:update", (raw: unknown) => {
+      const parsed = boardUpdateInputSchema.safeParse(raw);
+      if (!parsed.success) return;
+      const { boardId, elements } = parsed.data;
+      if (!(socket.data.canEditBoard as Set<string> | undefined)?.has(boardId)) return;
+      socket.to(`board:${boardId}`).emit("board:update", { boardId, elements, senderId: socket.id });
+    });
+
+    socket.on("board:files", (raw: unknown) => {
+      const parsed = boardFilesInputSchema.safeParse(raw);
+      if (!parsed.success) return;
+      const { boardId, files } = parsed.data;
+      if (!(socket.data.canEditBoard as Set<string> | undefined)?.has(boardId)) return;
+      socket.to(`board:${boardId}`).emit("board:files", { boardId, files });
+    });
+
+    socket.on("board:cursor", (raw: unknown) => {
+      const parsed = boardCursorInputSchema.safeParse(raw);
+      if (!parsed.success) return;
+      const { boardId, x, y, selectedIds } = parsed.data;
+      if (!(socket.data.boards as Set<string> | undefined)?.has(boardId)) return;
+      socket.to(`board:${boardId}`).emit("board:cursor", {
+        boardId,
+        socketId: socket.id,
+        userId: socket.data.userId as string,
+        displayName: socket.data.displayName as string,
+        avatarUrl: (socket.data.avatarUrl as string | null) ?? null,
+        x,
+        y,
+        selectedIds: selectedIds ?? [],
+      });
+    });
+
+    socket.on("disconnect", () => {
+      for (const boardId of [...((socket.data.boards as Set<string> | undefined) ?? [])]) {
+        leaveBoard(io, socket, boardId);
+      }
+      removePresence(io, socket);
+    });
   });
 
   registerCollaborationServer(io);

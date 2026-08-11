@@ -39,6 +39,7 @@ import {
   useReorderBoard,
 } from "../lib/boards.js";
 import { useSceneSaver } from "../lib/useSceneSaver.js";
+import { useBoardLiveSync } from "../lib/boardSync.js";
 import { useCreateTasksFromSelection } from "../lib/bridge.js";
 import type { SaveStatus } from "../lib/sceneSaver.js";
 import { ConfirmDialog } from "./ConfirmDialog.js";
@@ -470,6 +471,12 @@ function BoardCanvas({ workspaceId, boardId, canEdit, focus, onFocusHandled }: B
   const saver = useSceneSaver(workspaceId, boardId);
   const addToTasks = useCreateTasksFromSelection(workspaceId);
   const apiRef = useRef<ExcalidrawAPI | null>(null);
+  const live = useBoardLiveSync({
+    workspaceId,
+    boardId,
+    canEdit,
+    getApi: () => apiRef.current as never,
+  });
   const primed = useRef(false);
   const focusDone = useRef(false);
 
@@ -481,9 +488,10 @@ function BoardCanvas({ workspaceId, boardId, canEdit, focus, onFocusHandled }: B
   useEffect(() => {
     if (board && !primed.current) {
       saver.prime(board.elements, board.revision);
+      live.primeVersions(board.elements as never);
       primed.current = true;
     }
-  }, [board, saver]);
+  }, [board, saver, live]);
 
   useEffect(() => {
     if (!toast) return;
@@ -589,11 +597,27 @@ function BoardCanvas({ workspaceId, boardId, canEdit, focus, onFocusHandled }: B
           const count = Object.keys(appState.selectedElementIds ?? {}).length;
           setSelectedCount((prev) => (prev === count ? prev : count));
           if (!primed.current) return; // ignore the initial restore emit
-          saver.schedule({
-            elements: elements as readonly unknown[],
-            appState: sanitizeAppState(appState as unknown as Record<string, unknown>),
-            files: (files ?? {}) as Record<string, unknown>,
-          });
+          // Broadcast the change to peers (fast, ephemeral)...
+          live.broadcastScene(
+            elements as readonly never[],
+            (files ?? {}) as Record<string, unknown>,
+          );
+          // ...and persist only if we're the save leader (or offline/solo).
+          if (live.shouldPersist()) {
+            saver.schedule({
+              elements: elements as readonly unknown[],
+              appState: sanitizeAppState(appState as unknown as Record<string, unknown>),
+              files: (files ?? {}) as Record<string, unknown>,
+            });
+          }
+        }}
+        onPointerUpdate={(payload) => {
+          const selected = apiRef.current?.getAppState().selectedElementIds ?? {};
+          live.broadcastPointer(
+            payload.pointer?.x ?? null,
+            payload.pointer?.y ?? null,
+            Object.keys(selected),
+          );
         }}
       />
 

@@ -4,7 +4,7 @@ import { io } from "socket.io-client";
 import type { PresenceEntry, WorkspaceEvent } from "@plane-and-curves/shared";
 import type { WorkspaceTab } from "./currentWorkspace.js";
 
-const socket = io({ path: "/socket.io", autoConnect: false, withCredentials: true });
+export const socket = io({ path: "/socket.io", autoConnect: false, withCredentials: true });
 
 export function useWorkspaceCollaboration(workspaceId: string | undefined, activeSection: WorkspaceTab) {
   const queryClient = useQueryClient();
