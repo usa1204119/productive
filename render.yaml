@@ -34,11 +34,12 @@ services:
         sync: false
       - key: GOOGLE_DRIVE_REDIRECT_URI # https://<your-app>.onrender.com/auth/google/drive/callback
         sync: false
-      # Sharing is OFF until the feature is finished + a Resend key is set.
-      # In production, SHARING_ENABLED=true REQUIRES RESEND_API_KEY and MAIL_FROM
-      # (see apps/server/src/env.ts) — flip to "true" only after setting those.
+      # Sharing is ON. In production SHARING_ENABLED=true REQUIRES RESEND_API_KEY
+      # and MAIL_FROM (see apps/server/src/env.ts) — both are set in the Render
+      # dashboard (sync:false). To fully deliver invites to arbitrary recipients,
+      # verify a domain in Resend and set MAIL_FROM to an address on it.
       - key: SHARING_ENABLED
-        value: "false"
+        value: "true"
       - key: MAIL_PROVIDER
         value: resend
       - key: RESEND_API_KEY
