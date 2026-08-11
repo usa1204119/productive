@@ -44,6 +44,41 @@ export function useRenameBoard(workspaceId: string) {
   });
 }
 
+export function useReorderBoard(workspaceId: string) {
+  const qc = useQueryClient();
+  const key = boardsKey(workspaceId);
+  return useMutation({
+    mutationFn: ({ id, prevId, nextId }: { id: string; prevId: string | null; nextId: string | null }) =>
+      api<BoardSummaryDto>(`/workspaces/${workspaceId}/boards/${id}/reorder`, {
+        method: "POST",
+        body: JSON.stringify({ prevId, nextId }),
+      }),
+    onMutate: async ({ id, prevId, nextId }) => {
+      await qc.cancelQueries({ queryKey: key });
+      const prev = qc.getQueryData<BoardSummaryDto[]>(key) ?? [];
+      const byId = new Map(prev.map((b) => [b.id, b]));
+      const prevOrder = prevId ? (byId.get(prevId)?.order ?? null) : null;
+      const nextOrder = nextId ? (byId.get(nextId)?.order ?? null) : null;
+      let order: number;
+      if (prevOrder !== null && nextOrder !== null) order = (prevOrder + nextOrder) / 2;
+      else if (nextOrder !== null) order = nextOrder - 1000;
+      else if (prevOrder !== null) order = prevOrder + 1000;
+      else order = 1000;
+      qc.setQueryData<BoardSummaryDto[]>(
+        key,
+        prev
+          .map((b) => (b.id === id ? { ...b, order } : b))
+          .sort((a, b) => a.order - b.order),
+      );
+      return { prev };
+    },
+    onError: (_e, _v, ctx) => {
+      if (ctx?.prev) qc.setQueryData(key, ctx.prev);
+    },
+    onSettled: () => qc.invalidateQueries({ queryKey: key }),
+  });
+}
+
 export function useDeleteBoard(workspaceId: string) {
   const qc = useQueryClient();
   return useMutation({
@@ -58,12 +93,14 @@ export function saveBoardScene(
   workspaceId: string,
   boardId: string,
   scene: {
+    baseRevision: number;
     elements: readonly unknown[];
     appState: Record<string, unknown>;
     files?: Record<string, unknown>;
+    force?: boolean;
   },
-): Promise<unknown> {
-  return api(`/workspaces/${workspaceId}/boards/${boardId}/scene`, {
+): Promise<BoardSummaryDto> {
+  return api<BoardSummaryDto>(`/workspaces/${workspaceId}/boards/${boardId}/scene`, {
     method: "PUT",
     body: JSON.stringify(scene),
   });

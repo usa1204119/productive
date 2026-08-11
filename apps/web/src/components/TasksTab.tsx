@@ -31,6 +31,7 @@ export function TasksTab({
   const create = useCreateTask(workspace.id);
   const update = useUpdateTask(workspace.id);
   const reorder = useReorderTask(workspace.id);
+  const canEdit = workspace.currentRole !== "VIEWER";
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [newTitle, setNewTitle] = useState("");
@@ -59,6 +60,7 @@ export function TasksTab({
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 4 } }));
 
   const onDragEnd = (event: DragEndEvent) => {
+    if (!canEdit) return;
     const { active: dragged, over } = event;
     if (!over || dragged.id === over.id) return;
     const oldIndex = active.findIndex((t) => t.id === dragged.id);
@@ -107,6 +109,7 @@ export function TasksTab({
                           onToggle={() =>
                             update.mutate({ id: task.id, patch: { completed: true } })
                           }
+                          canEdit={canEdit}
                           onViewOnBoard={onViewOnBoard}
                         />
                       ))}
@@ -120,7 +123,7 @@ export function TasksTab({
                   </p>
                 )}
 
-                <div className="mt-3">
+                {canEdit && <div className="mt-3">
                   <input
                     ref={addRef}
                     value={newTitle}
@@ -131,7 +134,7 @@ export function TasksTab({
                     placeholder="Add task and press Enter…"
                     className="w-full rounded-lg border border-slate-200 px-3 py-2.5 text-sm outline-none transition focus:border-accent"
                   />
-                </div>
+                </div>}
 
                 {done.length > 0 && (
                   <div className="mt-8">
@@ -155,6 +158,7 @@ export function TasksTab({
                             onReopen={() =>
                               update.mutate({ id: task.id, patch: { completed: false } })
                             }
+                            canEdit={canEdit}
                           />
                         ))}
                       </ul>
@@ -173,6 +177,7 @@ export function TasksTab({
           task={selected}
           onClose={() => setSelectedId(null)}
           onViewOnBoard={onViewOnBoard}
+          canEdit={canEdit}
         />
       )}
     </div>
@@ -185,15 +190,18 @@ function SortableTaskRow({
   onSelect,
   onToggle,
   onViewOnBoard,
+  canEdit,
 }: {
   task: TaskDto;
   selected: boolean;
   onSelect: () => void;
   onToggle: () => void;
   onViewOnBoard: (boardId: string, elementId: string | null) => void;
+  canEdit: boolean;
 }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: task.id,
+    disabled: !canEdit,
   });
   const style = { transform: CSS.Transform.toString(transform), transition };
 
@@ -205,18 +213,19 @@ function SortableTaskRow({
         selected ? "border-accent/40 bg-accent/5" : "border-transparent hover:bg-slate-50"
       } ${isDragging ? "opacity-60 shadow-sm" : ""}`}
     >
-      <button
+      {canEdit && <button
         {...attributes}
         {...listeners}
         className="cursor-grab touch-none text-slate-300 opacity-0 transition group-hover:opacity-100"
         aria-label="Drag to reorder"
       >
         <GripVertical className="h-4 w-4" />
-      </button>
+      </button>}
       <input
         type="checkbox"
         checked={false}
         onChange={onToggle}
+        disabled={!canEdit}
         className="h-4 w-4 shrink-0 cursor-pointer rounded border-slate-300 text-accent focus:ring-accent"
         aria-label="Complete task"
       />
@@ -243,11 +252,13 @@ function DoneRow({
   selected,
   onSelect,
   onReopen,
+  canEdit,
 }: {
   task: TaskDto;
   selected: boolean;
   onSelect: () => void;
   onReopen: () => void;
+  canEdit: boolean;
 }) {
   return (
     <li
@@ -260,6 +271,7 @@ function DoneRow({
         type="checkbox"
         checked
         onChange={onReopen}
+        disabled={!canEdit}
         className="h-4 w-4 shrink-0 cursor-pointer rounded border-slate-300 text-accent focus:ring-accent"
         aria-label="Reopen task"
       />

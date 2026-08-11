@@ -55,7 +55,7 @@ async function main(): Promise<void> {
 
   const { createGuestUser } = await import("../src/lib/users.js");
   const { listWorkspaces, createWorkspace } = await import("../src/lib/workspaces.js");
-  const { createBoard, listBoards, getBoard, renameBoard, saveScene, deleteBoard } =
+  const { createBoard, listBoards, getBoard, renameBoard, saveScene, deleteBoard, reorderBoard } =
     await import("../src/lib/boards.js");
 
   const alice = await createGuestUser(prisma);
@@ -68,8 +68,9 @@ async function main(): Promise<void> {
   const list = await listBoards(prisma, ws.id);
   check("board appears in list", list.length === 1 && list[0]!.id === board.id);
   const summaryKeys = Object.keys(list[0]!).sort().join(",");
-  check("summary has only id,name,updatedAt", summaryKeys === "id,name,updatedAt");
+  check("summary has only id,name,order,revision,updatedAt", summaryKeys === "id,name,order,revision,updatedAt");
   check("summary carries no scene JSON", !("elements" in list[0]!) && !("appState" in list[0]!));
+  check("first slide order is 1000", list[0]!.order === 1000);
 
   console.log("\nTransparent storage — scene round-trips with unknown fields intact:");
   const elements = [
@@ -131,6 +132,41 @@ async function main(): Promise<void> {
   console.log("\nSave after delete (deleted while a save was in flight):");
   await expectCode("save to a deleted board", "BOARD_NOT_FOUND", () =>
     saveScene(prisma, ws.id, board.id, elements, appState),
+  );
+
+  console.log("\nSlide ordering (append / reorder / rebalance):");
+  const deck = await createWorkspace(prisma, alice.id, "Deck");
+  const s1 = await createBoard(prisma, deck.id, "S1");
+  const s2 = await createBoard(prisma, deck.id, "S2");
+  const s3 = await createBoard(prisma, deck.id, "S3");
+  check("slides append at 1000/2000/3000", s1.order === 1000 && s2.order === 2000 && s3.order === 3000);
+  const orderOf = async (id: string) => (await listBoards(prisma, deck.id)).find((b) => b.id === id)!.order;
+
+  await reorderBoard(prisma, deck.id, s3.id, null, s1.id); // move S3 to the top
+  check("moved to top gets a smaller order", (await orderOf(s3.id)) < (await orderOf(s1.id)));
+  const seqTop = (await listBoards(prisma, deck.id)).map((b) => b.name).join(",");
+  check("list order reflects the move (S3 first)", seqTop === "S3,S1,S2");
+
+  // Now sequence is S3, S1, S2. Place S2 between S3 (above) and S1 (below).
+  const between = await reorderBoard(prisma, deck.id, s2.id, s3.id, s1.id);
+  check(
+    "placed strictly between neighbours",
+    between.order > (await orderOf(s3.id)) && between.order < (await orderOf(s1.id)),
+  );
+
+  // Rebalance: force two adjacent slides to a sub-threshold gap, then reorder between.
+  await prisma.board.update({ where: { id: s1.id }, data: { order: 1000 } });
+  await prisma.board.update({ where: { id: s2.id }, data: { order: 1000.00005 } });
+  await prisma.board.update({ where: { id: s3.id }, data: { order: 3000 } });
+  await reorderBoard(prisma, deck.id, s3.id, s1.id, s2.id);
+  const rb = await listBoards(prisma, deck.id);
+  check("all orders distinct after rebalance", new Set(rb.map((b) => b.order)).size === rb.length);
+  check("S1 and S2 separated by a clean 1000 gap", rb[0]!.name === "S1" && rb[0]!.order === 1000 && rb[2]!.name === "S2" && rb[2]!.order === 2000);
+  check("S3 placed between S1 and S2", rb[1]!.name === "S3" && rb[1]!.order > 1000 && rb[1]!.order < 2000);
+
+  console.log("\nReorder scoping:");
+  await expectCode("reorder cross-workspace", "BOARD_NOT_FOUND", () =>
+    reorderBoard(prisma, otherWs.id, s1.id, null, null),
   );
 
   await prisma.$disconnect();

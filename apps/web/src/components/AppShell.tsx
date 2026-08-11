@@ -9,7 +9,7 @@ import { WorkspaceView } from "./WorkspaceView.js";
 export function AppShell({ user }: { user: UserDto }) {
   // Sidebar open/closed, remembered across reloads and toggled by the hamburger.
   const [sidebarOpen, setSidebarOpen] = useState(
-    () => localStorage.getItem("pac.sidebar") !== "closed",
+    () => window.innerWidth >= 768 && localStorage.getItem("pac.sidebar") !== "closed",
   );
   const toggleSidebar = () =>
     setSidebarOpen((open) => {
@@ -23,7 +23,12 @@ export function AppShell({ user }: { user: UserDto }) {
       <div className="flex h-full flex-col">
         <TopBar user={user} sidebarOpen={sidebarOpen} onToggleSidebar={toggleSidebar} />
         <div className="flex min-h-0 flex-1">
-          {sidebarOpen && <Sidebar />}
+          {sidebarOpen && (
+            <>
+              <button type="button" aria-label="Close sidebar" onClick={toggleSidebar} className="fixed inset-0 z-30 bg-slate-900/25 md:hidden" />
+              <div className="fixed inset-y-0 left-0 top-[3.25rem] z-40 md:static md:z-auto"><Sidebar /></div>
+            </>
+          )}
           <main className="min-w-0 flex-1 bg-slate-50">
             <MainArea user={user} />
           </main>

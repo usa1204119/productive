@@ -16,14 +16,26 @@ export const renameBoardSchema = z.object({ name: boardName });
 export type RenameBoardInput = z.infer<typeof renameBoardSchema>;
 
 /**
+ * Reorder a slide between two neighbours (either may be null for the top/bottom
+ * of the deck). The server computes the new float order. Mirrors task reordering.
+ */
+export const reorderBoardSchema = z.object({
+  prevId: z.string().nullable(),
+  nextId: z.string().nullable(),
+});
+export type ReorderBoardInput = z.infer<typeof reorderBoardSchema>;
+
+/**
  * Scene payload sent on autosave. Permissive by design — no stripping.
  * `files` carries Excalidraw image binaries (data URLs) keyed by fileId; without
  * it images become broken placeholders on reload.
  */
 export const saveSceneSchema = z.object({
+  baseRevision: z.number().int().nonnegative(),
   elements: z.array(z.unknown()),
   appState: z.record(z.string(), z.unknown()),
   files: z.record(z.string(), z.unknown()).optional().default({}),
+  force: z.boolean().optional().default(false),
 });
 export type SaveSceneInput = z.infer<typeof saveSceneSchema>;
 
@@ -36,7 +48,9 @@ export const boardParamsSchema = z.object({
 export const boardSummaryDtoSchema = z.object({
   id: z.string(),
   name: z.string(),
+  order: z.number(),
   updatedAt: z.string(),
+  revision: z.number().int().nonnegative(),
 });
 export type BoardSummaryDto = z.infer<typeof boardSummaryDtoSchema>;
 
@@ -47,6 +61,8 @@ export const boardDtoSchema = z.object({
   elements: z.array(z.unknown()),
   appState: z.record(z.string(), z.unknown()),
   files: z.record(z.string(), z.unknown()),
+  order: z.number(),
   updatedAt: z.string(),
+  revision: z.number().int().nonnegative(),
 });
 export type BoardDto = z.infer<typeof boardDtoSchema>;

@@ -25,3 +25,6 @@ npm-debug.log*
 .idea/
 .vscode/*
 !.vscode/extensions.json
+
+# Workspace-local developer tools
+/.tools/

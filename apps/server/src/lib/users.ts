@@ -14,8 +14,11 @@ async function createUserWithStarterWorkspace(
 ): Promise<User> {
   return db.$transaction(async (tx) => {
     const user = await tx.user.create({ data });
-    await tx.workspace.create({
+    const workspace = await tx.workspace.create({
       data: { userId: user.id, name: STARTER_WORKSPACE_NAME },
+    });
+    await tx.workspaceMember.create({
+      data: { workspaceId: workspace.id, userId: user.id, role: "OWNER" },
     });
     return user;
   });

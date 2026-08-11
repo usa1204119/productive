@@ -46,7 +46,8 @@ export function DocumentsTab({
   user: UserDto;
 }) {
   const queryClient = useQueryClient();
-  const canUseDrive = !user.isGuest && user.driveConnected;
+  const canEdit = workspace.currentRole !== "VIEWER";
+  const canUseDrive = !user.isGuest && (!workspace.isOwner || user.driveConnected);
   const documents = useDocuments(workspace.id, canUseDrive);
   const { data: tasks = [] } = useTasks(workspace.id);
   const attach = useAttachDocument(workspace.id);
@@ -204,7 +205,7 @@ export function DocumentsTab({
     );
   }
 
-  if (!user.driveConnected) {
+  if (workspace.isOwner && !user.driveConnected) {
     return (
       <DriveGate
         title="Connect Google Drive"
@@ -231,7 +232,7 @@ export function DocumentsTab({
           </div>
         )}
 
-        <label
+        {canEdit && <label
           className={`flex cursor-pointer flex-col items-center justify-center rounded-2xl border border-dashed bg-white px-6 py-10 text-center transition ${
             dragging
               ? "border-accent bg-accent/5"
@@ -268,7 +269,7 @@ export function DocumentsTab({
               event.target.value = "";
             }}
           />
-        </label>
+        </label>}
 
         {uploads.length > 0 && (
           <section
@@ -400,7 +401,7 @@ export function DocumentsTab({
                     </p>
                   </div>
 
-                  <label className="flex items-center gap-1.5 text-xs text-slate-400">
+                  {canEdit && <label className="flex items-center gap-1.5 text-xs text-slate-400">
                     <Link2 className="h-3.5 w-3.5" />
                     <span className="sr-only">Attach {document.name} to task</span>
                     <select
@@ -422,7 +423,7 @@ export function DocumentsTab({
                         </option>
                       ))}
                     </select>
-                  </label>
+                  </label>}
 
                   {!document.missing && (
                     <a
@@ -436,7 +437,7 @@ export function DocumentsTab({
                       <ExternalLink className="h-4 w-4" />
                     </a>
                   )}
-                  <button
+                  {canEdit && <button
                     type="button"
                     onClick={() => {
                       setDeleteFromDrive(false);
@@ -447,7 +448,7 @@ export function DocumentsTab({
                     title="Remove"
                   >
                     <Trash2 className="h-4 w-4" />
-                  </button>
+                  </button>}
                 </li>
               ))}
             </ul>
@@ -464,7 +465,7 @@ export function DocumentsTab({
                 This removes the document from Swift Productive. The Google Drive
                 file is kept by default.
               </p>
-              {!removeTarget.missing && (
+              {workspace.isOwner && !removeTarget.missing && (
                 <label className="flex items-start gap-2 rounded-lg bg-slate-50 p-3">
                   <input
                     type="checkbox"

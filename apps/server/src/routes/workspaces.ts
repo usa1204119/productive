@@ -6,7 +6,10 @@ import {
 } from "@plane-and-curves/shared";
 import { prisma } from "../db.js";
 import { requireAuth } from "../middleware/auth.js";
-import { requireWorkspace } from "../middleware/workspace.js";
+import {
+  requireWorkspaceAccess,
+  requireWorkspaceOwner,
+} from "../middleware/workspace.js";
 import { validateBody, validateParams } from "../middleware/validate.js";
 import { ok } from "../lib/respond.js";
 import {
@@ -16,6 +19,7 @@ import {
   renameWorkspace,
   toWorkspaceDto,
 } from "../lib/workspaces.js";
+import { emitWorkspaceEvent } from "../collaboration/hub.js";
 
 export const workspacesRouter = Router();
 
@@ -26,7 +30,7 @@ workspacesRouter.use(requireAuth);
 workspacesRouter.get("/", async (req, res, next) => {
   try {
     const workspaces = await listWorkspaces(prisma, req.user!.id);
-    ok(res, workspaces.map(toWorkspaceDto));
+    ok(res, workspaces.map((workspace) => toWorkspaceDto(workspace, workspace.currentRole)));
   } catch (err) {
     next(err);
   }
@@ -47,12 +51,14 @@ workspacesRouter.post("/", validateBody(createWorkspaceSchema), async (req, res,
 workspacesRouter.patch(
   "/:workspaceId",
   validateParams(workspaceParamsSchema),
-  requireWorkspace,
+  requireWorkspaceAccess,
+  requireWorkspaceOwner,
   validateBody(renameWorkspaceSchema),
   async (req, res, next) => {
     try {
       const { name } = req.body as { name: string };
       const workspace = await renameWorkspace(prisma, req.user!.id, req.workspace!.id, name);
+      emitWorkspaceEvent(req.workspace!.id, { type: "workspace.updated", entityId: req.workspace!.id, actorUserId: req.user!.id });
       ok(res, toWorkspaceDto(workspace));
     } catch (err) {
       next(err);
@@ -68,7 +74,8 @@ workspacesRouter.patch(
 workspacesRouter.delete(
   "/:workspaceId",
   validateParams(workspaceParamsSchema),
-  requireWorkspace,
+  requireWorkspaceAccess,
+  requireWorkspaceOwner,
   async (req, res, next) => {
     try {
       await deleteWorkspace(prisma, req.user!.id, req.workspace!.id);

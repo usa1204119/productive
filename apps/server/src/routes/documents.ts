@@ -10,9 +10,9 @@ import {
   uploadProgressParamsSchema,
 } from "@plane-and-curves/shared";
 import { prisma } from "../db.js";
-import { AppError } from "../errors.js";
+import { AppError, forbidden } from "../errors.js";
 import { requireAuth } from "../middleware/auth.js";
-import { requireWorkspace } from "../middleware/workspace.js";
+import { requireWorkspaceAccess, requireWorkspaceRole } from "../middleware/workspace.js";
 import {
   validateBody,
   validateParams,
@@ -31,6 +31,7 @@ import {
   subscribeUploadProgress,
   uploadProgressKey,
 } from "../lib/uploadProgress.js";
+import { emitWorkspaceEvent } from "../collaboration/hub.js";
 
 // Mounted at /workspaces/:workspaceId/documents.
 export const documentsRouter = Router({ mergeParams: true });
@@ -49,7 +50,7 @@ const requireNonGuest: RequestHandler = (req, _res, next) => {
   next();
 };
 
-documentsRouter.use(requireAuth, requireWorkspace, requireNonGuest);
+documentsRouter.use(requireAuth, requireWorkspaceAccess, requireNonGuest);
 
 const uploadMetadataSchema = z.object({
   name: z.string().trim().min(1).max(MAX_DOCUMENT_NAME_LENGTH),
@@ -83,6 +84,7 @@ function uploadMetadata(req: Parameters<RequestHandler>[0]) {
 documentsRouter.get(
   "/uploads/:uploadId/events",
   validateParams(uploadProgressParamsSchema),
+  requireWorkspaceRole("EDITOR"),
   (req, res) => {
     const key = uploadProgressKey(
       req.user!.id,
@@ -119,10 +121,11 @@ documentsRouter.get(
 /** List documents and surface Drive-deleted files as missing records. */
 documentsRouter.get("/", async (req, res, next) => {
   try {
-    const drive = await getUserDriveClient(prisma, req.user!.id);
+    const driveOwnerId = req.workspace!.userId;
+    const drive = await getUserDriveClient(prisma, driveOwnerId);
     const documents = await withDriveErrors(
       prisma,
-      req.user!.id,
+      driveOwnerId,
       drive,
       (client) => listDocuments(prisma, client, req.workspace!.id),
     );
@@ -136,7 +139,7 @@ documentsRouter.get("/", async (req, res, next) => {
  * Stream a single raw file body. Metadata lives in bounded headers so the
  * server can reject oversize uploads before initiating a Drive upload.
  */
-documentsRouter.post("/", async (req, res, next) => {
+documentsRouter.post("/", requireWorkspaceRole("EDITOR"), async (req, res, next) => {
   let key: string | null = null;
   const abortController = new AbortController();
   const onAborted = () => abortController.abort();
@@ -163,14 +166,16 @@ documentsRouter.post("/", async (req, res, next) => {
       errorCode: null,
     });
 
-    const drive = await getUserDriveClient(prisma, req.user!.id);
+    const driveOwnerId = req.workspace!.userId;
+    const drive = await getUserDriveClient(prisma, driveOwnerId);
     const document = await withDriveErrors(
       prisma,
-      req.user!.id,
+      driveOwnerId,
       drive,
       (client) =>
         uploadDocument(prisma, client, {
           userId: req.user!.id,
+          driveOwnerId,
           workspaceId: req.workspace!.id,
           name: metadata.name,
           mimeType: metadata.mimeType,
@@ -194,6 +199,7 @@ documentsRouter.post("/", async (req, res, next) => {
       totalBytes: metadata.sizeBytes,
       errorCode: null,
     });
+    emitWorkspaceEvent(req.workspace!.id, { type: "document.created", entityId: document.id, actorUserId: req.user!.id });
     ok(res, document, 201);
   } catch (err) {
     if (key) {
@@ -214,6 +220,7 @@ documentsRouter.post("/", async (req, res, next) => {
 documentsRouter.patch(
   "/:documentId",
   validateParams(documentParamsSchema),
+  requireWorkspaceRole("EDITOR"),
   validateBody(attachDocumentSchema),
   async (req, res, next) => {
     try {
@@ -223,6 +230,7 @@ documentsRouter.patch(
         req.params.documentId!,
         (req.body as { taskId: string | null }).taskId,
       );
+      emitWorkspaceEvent(req.workspace!.id, { type: "document.updated", entityId: document.id, actorUserId: req.user!.id });
       ok(res, document);
     } catch (err) {
       next(err);
@@ -238,15 +246,19 @@ documentsRouter.delete(
   "/:documentId",
   validateParams(documentParamsSchema),
   validateQuery(deleteDocumentQuerySchema),
+  requireWorkspaceRole("EDITOR"),
   async (req, res, next) => {
     try {
       const deleteFromDrive = (req.query as unknown as { deleteFromDrive: boolean })
         .deleteFromDrive;
+      if (deleteFromDrive && !req.workspaceAccess!.isOwner) {
+        throw forbidden("Only the workspace owner can permanently delete a Drive file");
+      }
       const drive = deleteFromDrive
-        ? await getUserDriveClient(prisma, req.user!.id)
+        ? await getUserDriveClient(prisma, req.workspace!.userId)
         : null;
       if (drive) {
-        await withDriveErrors(prisma, req.user!.id, drive, (client) =>
+        await withDriveErrors(prisma, req.workspace!.userId, drive, (client) =>
           deleteDocument(
             prisma,
             client,
@@ -264,6 +276,7 @@ documentsRouter.delete(
           false,
         );
       }
+      emitWorkspaceEvent(req.workspace!.id, { type: "document.deleted", entityId: req.params.documentId, actorUserId: req.user!.id });
       ok(res, { deleted: true });
     } catch (err) {
       next(err);

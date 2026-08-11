@@ -1,27 +1,51 @@
 import type { RequestHandler } from "express";
+import type { WorkspaceRole } from "@prisma/client";
 import { prisma } from "../db.js";
-import { AppError } from "../errors.js";
-import { getOwnedWorkspace } from "../lib/workspaces.js";
+import { AppError, forbidden } from "../errors.js";
+import { getWorkspaceAccess } from "../authorization/workspaceAccess.js";
 
-/**
- * Shared ownership guard for workspace-scoped routes. Runs after requireAuth,
- * resolves :workspaceId with a SINGLE query scoped to the authenticated user,
- * and attaches the workspace. Anything the user doesn't own is indistinguishable
- * from a missing workspace (404 WORKSPACE_NOT_FOUND) — no ownership leak.
- *
- * This lives here, once, so no route re-implements the check.
- */
-export const requireWorkspace: RequestHandler = async (req, _res, next) => {
+const rank: Record<WorkspaceRole, number> = { VIEWER: 0, EDITOR: 1, OWNER: 2 };
+
+/** Resolve a workspace and the caller's membership in one scoped query. */
+export const requireWorkspaceAccess: RequestHandler = async (req, _res, next) => {
   try {
     const workspaceId = req.params.workspaceId;
     if (!workspaceId) throw new AppError(404, "WORKSPACE_NOT_FOUND", "Workspace not found");
 
-    const workspace = await getOwnedWorkspace(prisma, req.user!.id, workspaceId);
-    if (!workspace) throw new AppError(404, "WORKSPACE_NOT_FOUND", "Workspace not found");
+    const access = await getWorkspaceAccess(prisma, req.user!.id, workspaceId);
+    if (!access) throw new AppError(404, "WORKSPACE_NOT_FOUND", "Workspace not found");
 
-    req.workspace = workspace;
+    req.workspace = access.workspace;
+    req.workspaceAccess = { role: access.role, isOwner: access.isOwner };
     next();
-  } catch (err) {
-    next(err);
+  } catch (error) {
+    next(error);
   }
 };
+
+/** Require at least the supplied role; use after requireWorkspaceAccess. */
+export function requireWorkspaceRole(minimumRole: WorkspaceRole): RequestHandler {
+  return (req, _res, next) => {
+    if (!req.workspaceAccess) {
+      next(new AppError(500, "INTERNAL_ERROR", "Workspace authorization was not initialized"));
+      return;
+    }
+    if (rank[req.workspaceAccess.role] < rank[minimumRole]) {
+      next(forbidden("Your workspace role does not allow this action"));
+      return;
+    }
+    next();
+  };
+}
+
+/** Canonical-owner-only operations: sharing, workspace lifecycle and Drive deletion. */
+export const requireWorkspaceOwner: RequestHandler = (req, _res, next) => {
+  if (!req.workspaceAccess?.isOwner) {
+    next(forbidden("Only the workspace owner can perform this action"));
+    return;
+  }
+  next();
+};
+
+/** Backward-compatible name while route modules migrate to explicit policies. */
+export const requireWorkspace = requireWorkspaceAccess;

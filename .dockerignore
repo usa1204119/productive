@@ -1,10 +1,9 @@
-node_modules
-**/node_modules
-**/dist
 .git
-.env
-**/.env
+.github
+.tools
+node_modules
+**/dist
+**/playwright-report
+**/test-results
+apps/server/.env
 apps/server/prisma/smoke-schema.sql
-*.log
-.vscode
-.idea

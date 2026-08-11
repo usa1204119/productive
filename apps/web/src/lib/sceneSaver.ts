@@ -14,7 +14,7 @@
  * timers and has no React or network dependency of its own.
  */
 
-export type SaveStatus = "idle" | "dirty" | "saving" | "saved" | "error";
+export type SaveStatus = "idle" | "dirty" | "saving" | "saved" | "error" | "conflict";
 
 export interface Scene {
   elements: readonly unknown[];
@@ -25,25 +25,35 @@ export interface Scene {
 
 export interface SceneSaverOptions {
   /** Persist a scene. Rejects on failure (network/server). */
-  save: (scene: Scene) => Promise<void>;
+  save: (
+    scene: Scene,
+    baseRevision: number,
+    force: boolean,
+  ) => Promise<void | { revision: number }>;
   /** Version of the scene's elements (e.g. Excalidraw getSceneVersion). */
   versionOf: (elements: readonly unknown[]) => number;
   debounceMs?: number;
   /** Base backoff between retries; doubles each attempt up to 8x. */
   retryBaseMs?: number;
   onStatusChange?: (status: SaveStatus) => void;
+  isConflict?: (error: unknown) => boolean;
+  onConflict?: (scene: Scene) => void;
 }
 
 export class SceneSaver {
-  private readonly save: (scene: Scene) => Promise<void>;
+  private readonly save: SceneSaverOptions["save"];
   private readonly versionOf: (elements: readonly unknown[]) => number;
   private readonly debounceMs: number;
   private readonly retryBaseMs: number;
   private readonly onStatusChange?: (status: SaveStatus) => void;
+  private readonly isConflict: (error: unknown) => boolean;
+  private readonly onConflict?: (scene: Scene) => void;
 
   private latest: Scene | null = null;
   private savedVersion: number | null = null;
   private inFlight = false;
+  private activeSave: Promise<void> | null = null;
+  private revision = 0;
   private retryAttempt = 0;
   private debounceTimer: ReturnType<typeof setTimeout> | null = null;
   private retryTimer: ReturnType<typeof setTimeout> | null = null;
@@ -56,6 +66,8 @@ export class SceneSaver {
     this.debounceMs = opts.debounceMs ?? 1000;
     this.retryBaseMs = opts.retryBaseMs ?? 2000;
     this.onStatusChange = opts.onStatusChange;
+    this.isConflict = opts.isConflict ?? (() => false);
+    this.onConflict = opts.onConflict;
   }
 
   get status(): SaveStatus {
@@ -72,8 +84,9 @@ export class SceneSaver {
    * Seed the last-saved version without triggering a save — call this when a
    * board loads so its untouched initial scene isn't re-saved.
    */
-  primeSaved(elements: readonly unknown[]): void {
+  primeSaved(elements: readonly unknown[], revision = 0): void {
     this.savedVersion = this.versionOf(elements);
+    this.revision = revision;
     this.setStatus("saved");
   }
 
@@ -81,6 +94,7 @@ export class SceneSaver {
   schedule(scene: Scene): void {
     if (this.disposed) return;
     this.latest = scene;
+    if (this._status === "conflict") return;
     const version = this.versionOf(scene.elements);
     // Nothing changed and we're not recovering from an error → ignore.
     if (version === this.savedVersion && this._status !== "error") return;
@@ -89,7 +103,7 @@ export class SceneSaver {
     if (this.debounceTimer) clearTimeout(this.debounceTimer);
     this.debounceTimer = setTimeout(() => {
       this.debounceTimer = null;
-      void this.flush();
+      void this.startFlush();
     }, this.debounceMs);
   }
 
@@ -99,16 +113,34 @@ export class SceneSaver {
       clearTimeout(this.retryTimer);
       this.retryTimer = null;
     }
-    void this.flush();
+    void this.startFlush();
   }
 
   /** Flush any pending change synchronously-ish (e.g. before switching boards). */
-  flushNow(): void {
+  async flushNow(): Promise<void> {
     if (this.debounceTimer) {
       clearTimeout(this.debounceTimer);
       this.debounceTimer = null;
     }
-    void this.flush();
+    if (this.activeSave) await this.activeSave;
+    if (this._status === "dirty" || this._status === "error") await this.startFlush();
+    if (this.activeSave) await this.activeSave;
+  }
+
+  overwriteNow(): Promise<void> {
+    if (this._status !== "conflict") return Promise.resolve();
+    this.setStatus("dirty");
+    return this.startFlush(true);
+  }
+
+  acceptLatest(elements: readonly unknown[], revision: number): void {
+    if (this.retryTimer) clearTimeout(this.retryTimer);
+    this.retryTimer = null;
+    this.latest = null;
+    this.savedVersion = this.versionOf(elements);
+    this.revision = revision;
+    this.retryAttempt = 0;
+    this.setStatus("saved");
   }
 
   dispose(): void {
@@ -119,7 +151,19 @@ export class SceneSaver {
     this.retryTimer = null;
   }
 
-  private async flush(): Promise<void> {
+  private startFlush(force = false): Promise<void> {
+    if (this.disposed || !this.latest) return Promise.resolve();
+    if (this.activeSave) return this.activeSave;
+    const operation = this.flush(force);
+    this.activeSave = operation;
+    void operation.finally(() => {
+      if (this.activeSave === operation) this.activeSave = null;
+      if (!this.disposed && this._status === "dirty") void this.startFlush();
+    });
+    return operation;
+  }
+
+  private async flush(force = false): Promise<void> {
     if (this.disposed || this.inFlight || !this.latest) return;
 
     const scene = this.latest;
@@ -132,20 +176,26 @@ export class SceneSaver {
     this.inFlight = true;
     this.setStatus("saving");
     try {
-      await this.save(scene);
+      const result = await this.save(scene, this.revision, force);
       this.inFlight = false;
       this.savedVersion = version;
+      this.revision = result?.revision ?? this.revision + 1;
       this.retryAttempt = 0;
 
       // Latest-wins: if the scene changed while we were saving, save again now.
       if (this.latest && this.versionOf(this.latest.elements) !== this.savedVersion) {
         this.setStatus("dirty");
-        void this.flush();
+        // startFlush's completion handler immediately persists this latest version.
       } else {
         this.setStatus("saved");
       }
-    } catch {
+    } catch (error) {
       this.inFlight = false;
+      if (this.isConflict(error)) {
+        this.setStatus("conflict");
+        this.onConflict?.(scene);
+        return;
+      }
       this.setStatus("error");
       this.scheduleRetry();
     }
@@ -158,7 +208,7 @@ export class SceneSaver {
     this.retryAttempt += 1;
     this.retryTimer = setTimeout(() => {
       this.retryTimer = null;
-      void this.flush();
+      void this.startFlush();
     }, this.retryBaseMs * factor);
   }
 }

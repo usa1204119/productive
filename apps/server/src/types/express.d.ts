@@ -1,4 +1,4 @@
-import type { User, Workspace } from "@prisma/client";
+import type { User, Workspace, WorkspaceRole } from "@prisma/client";
 
 declare global {
   // eslint-disable-next-line @typescript-eslint/no-namespace
@@ -6,8 +6,13 @@ declare global {
     interface Request {
       // Set by requireAuth.
       user?: User;
-      // Set by requireWorkspace (already ownership-verified).
+      // Set by membership-aware workspace authorization.
       workspace?: Workspace;
+      workspaceAccess?: {
+        role: WorkspaceRole;
+        isOwner: boolean;
+      };
+      requestId?: string;
     }
   }
 }

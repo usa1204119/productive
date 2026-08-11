@@ -13,4 +13,18 @@ export const logger = pino({
         },
       }),
   base: { env: env.NODE_ENV },
+  redact: {
+    paths: [
+      "req.headers.cookie",
+      "req.headers.authorization",
+      "headers.cookie",
+      "headers.authorization",
+      "code",
+      "token",
+      "apiKey",
+      "clientSecret",
+      "refreshToken",
+    ],
+    censor: "[REDACTED]",
+  },
 });

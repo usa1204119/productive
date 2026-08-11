@@ -18,6 +18,25 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+enum WorkspaceRole {
+  OWNER
+  EDITOR
+  VIEWER
+}
+
+enum DriveAclAction {
+  GRANT
+  UPDATE
+  REVOKE
+}
+
+enum OutboxStatus {
+  PENDING
+  PROCESSING
+  SUCCEEDED
+  FAILED
+}
+
 // ---------------------------------------------------------------------------
 // User & auth
 // ---------------------------------------------------------------------------
@@ -33,10 +52,14 @@ model User {
   driveRootFolderId String?
   createdAt         DateTime @default(now()) @db.Timestamptz(3)
 
-  workspaces        Workspace[]
-  sessions          Session[]
-  googleCredentials GoogleCredential[]
-  uploadedDocuments Document[]         @relation("UploadedDocuments")
+  workspaces           Workspace[]           @relation("WorkspaceOwner")
+  sessions             Session[]
+  googleCredentials    GoogleCredential[]
+  uploadedDocuments    Document[]            @relation("UploadedDocuments")
+  workspaceMemberships WorkspaceMember[]     @relation("WorkspaceMemberUser")
+  invitedMemberships   WorkspaceMember[]     @relation("WorkspaceMemberInviter")
+  sentInvitations      WorkspaceInvitation[] @relation("WorkspaceInvitationInviter")
+  workspaceAuditLogs   WorkspaceAuditLog[]   @relation("WorkspaceAuditActor")
 }
 
 // A GoogleCredential represents a DRIVE CONNECTION, not a general Google login.
@@ -87,10 +110,14 @@ model Workspace {
   createdAt     DateTime @default(now()) @db.Timestamptz(3)
   updatedAt     DateTime @updatedAt @db.Timestamptz(3)
 
-  user      User       @relation(fields: [userId], references: [id], onDelete: Cascade)
-  boards    Board[]
-  tasks     Task[]
-  documents Document[]
+  user         User                  @relation("WorkspaceOwner", fields: [userId], references: [id], onDelete: Cascade)
+  boards       Board[]
+  tasks        Task[]
+  documents    Document[]
+  members      WorkspaceMember[]
+  invitations  WorkspaceInvitation[]
+  auditLogs    WorkspaceAuditLog[]
+  driveAclJobs DriveAclSyncJob[]
 
   @@index([userId])
 }
@@ -117,12 +144,95 @@ model Board {
   // in `elements` (which only reference a fileId) — without this they render as
   // broken placeholders after reload. Nullable so existing rows migrate cleanly.
   files       Json?    @db.Json
+  revision    Int      @default(0)
+  // Slide order within the workspace (float ordering, like Task.order): insert =
+  // average of neighbours; rebalance to multiples of 1000 when the gap is tiny.
+  order       Float    @default(0)
   updatedAt   DateTime @updatedAt @db.Timestamptz(3)
 
-  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  workspace    Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   // Back-link only; deleting a Board sets Task.sourceBoardId to null (below).
-  sourcedTasks Task[]   @relation("TaskSourceBoard")
+  sourcedTasks Task[]    @relation("TaskSourceBoard")
 
+  @@index([workspaceId])
+  @@index([workspaceId, order])
+}
+
+model WorkspaceMember {
+  id                String        @id @default(cuid())
+  workspaceId       String
+  userId            String
+  role              WorkspaceRole
+  invitedById       String?
+  drivePermissionId String?
+  aclSyncStatus     OutboxStatus?
+  aclSyncError      String?
+  joinedAt          DateTime      @default(now()) @db.Timestamptz(3)
+  updatedAt         DateTime      @updatedAt @db.Timestamptz(3)
+
+  workspace    Workspace         @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user         User              @relation("WorkspaceMemberUser", fields: [userId], references: [id], onDelete: Cascade)
+  invitedBy    User?             @relation("WorkspaceMemberInviter", fields: [invitedById], references: [id], onDelete: SetNull)
+  driveAclJobs DriveAclSyncJob[]
+
+  @@unique([workspaceId, userId])
+  @@index([userId])
+  @@index([workspaceId, role])
+}
+
+model WorkspaceInvitation {
+  id              String        @id @default(cuid())
+  workspaceId     String
+  emailNormalized String
+  role            WorkspaceRole
+  tokenHash       String        @unique
+  invitedById     String
+  expiresAt       DateTime      @db.Timestamptz(3)
+  acceptedAt      DateTime?     @db.Timestamptz(3)
+  revokedAt       DateTime?     @db.Timestamptz(3)
+  createdAt       DateTime      @default(now()) @db.Timestamptz(3)
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  invitedBy User      @relation("WorkspaceInvitationInviter", fields: [invitedById], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId])
+  @@index([emailNormalized])
+  @@index([expiresAt])
+}
+
+model WorkspaceAuditLog {
+  id          String   @id @default(cuid())
+  workspaceId String
+  actorUserId String?
+  action      String
+  metadata    Json?
+  createdAt   DateTime @default(now()) @db.Timestamptz(3)
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  actor     User?     @relation("WorkspaceAuditActor", fields: [actorUserId], references: [id], onDelete: SetNull)
+
+  @@index([workspaceId, createdAt])
+}
+
+model DriveAclSyncJob {
+  id              String         @id @default(cuid())
+  workspaceId     String
+  memberId        String?
+  action          DriveAclAction
+  status          OutboxStatus   @default(PENDING)
+  emailNormalized String
+  desiredRole     WorkspaceRole?
+  permissionId    String?
+  attempts        Int            @default(0)
+  nextAttemptAt   DateTime       @default(now()) @db.Timestamptz(3)
+  lastError       String?
+  createdAt       DateTime       @default(now()) @db.Timestamptz(3)
+  updatedAt       DateTime       @updatedAt @db.Timestamptz(3)
+
+  workspace Workspace        @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  member    WorkspaceMember? @relation(fields: [memberId], references: [id], onDelete: SetNull)
+
+  @@index([status, nextAttemptAt])
   @@index([workspaceId])
 }
 
@@ -142,9 +252,9 @@ model Task {
   createdAt       DateTime  @default(now()) @db.Timestamptz(3)
   updatedAt       DateTime  @updatedAt @db.Timestamptz(3)
 
-  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  workspace   Workspace  @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   // Deleting a Board must NOT delete tasks — just clear the back-link.
-  sourceBoard Board?    @relation("TaskSourceBoard", fields: [sourceBoardId], references: [id], onDelete: SetNull)
+  sourceBoard Board?     @relation("TaskSourceBoard", fields: [sourceBoardId], references: [id], onDelete: SetNull)
   documents   Document[]
 
   @@index([workspaceId])

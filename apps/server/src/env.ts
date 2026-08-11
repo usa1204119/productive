@@ -5,6 +5,8 @@ import { z } from "zod";
  * This module validates them once at startup and fails fast with a clear
  * message if anything required is missing or malformed.
  */
+const booleanString = z.enum(["true", "false"]).transform((value) => value === "true");
+
 const envSchema = z.object({
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
   PORT: z.coerce.number().int().positive().default(4000),
@@ -28,6 +30,36 @@ const envSchema = z.object({
   ENCRYPTION_KEY: z
     .string()
     .regex(/^[0-9a-fA-F]{64}$/, "ENCRYPTION_KEY must be 64 hex characters (32 bytes)"),
+  SHARING_ENABLED: booleanString.default("false"),
+  MAIL_PROVIDER: z.enum(["console", "resend", "memory"]).default("console"),
+  RESEND_API_KEY: z.string().min(1).optional(),
+  MAIL_FROM: z.string().min(1).optional(),
+  INVITE_TTL_HOURS: z.coerce.number().int().positive().max(24 * 30).default(168),
+  REDIS_URL: z.string().url().optional(),
+  E2E_TEST_MODE: booleanString.default("false"),
+}).superRefine((value, ctx) => {
+  if (value.NODE_ENV === "production" && value.SHARING_ENABLED) {
+    if (value.MAIL_PROVIDER !== "resend") {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["MAIL_PROVIDER"],
+        message: "production sharing requires MAIL_PROVIDER=resend",
+      });
+    }
+    if (!value.RESEND_API_KEY) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["RESEND_API_KEY"], message: "required" });
+    }
+    if (!value.MAIL_FROM) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["MAIL_FROM"], message: "required" });
+    }
+  }
+  if (value.E2E_TEST_MODE && value.NODE_ENV !== "test") {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["E2E_TEST_MODE"],
+      message: "may only be enabled when NODE_ENV=test",
+    });
+  }
 });
 
 const parsed = envSchema.safeParse(process.env);

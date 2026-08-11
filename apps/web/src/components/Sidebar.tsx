@@ -17,7 +17,7 @@ export function Sidebar() {
   const [deleting, setDeleting] = useState<WorkspaceDto | null>(null);
   const [createError, setCreateError] = useState<string | null>(null);
 
-  const atLimit = workspaces.length >= MAX_WORKSPACES_PER_USER;
+  const atLimit = workspaces.filter((workspace) => workspace.isOwner).length >= MAX_WORKSPACES_PER_USER;
 
   const onNew = () => {
     setCreateError(null);
@@ -176,7 +176,7 @@ function WorkspaceRow({
         {workspace.name}
       </button>
 
-      <div ref={menuRef} className="relative">
+      {workspace.isOwner && <div ref={menuRef} className="relative">
         <button
           onClick={() => setMenuOpen((v) => !v)}
           className="mr-1 rounded p-1 text-slate-400 opacity-0 transition hover:bg-slate-100 hover:text-slate-600 group-hover:opacity-100 aria-expanded:opacity-100"
@@ -209,7 +209,7 @@ function WorkspaceRow({
             </button>
           </div>
         )}
-      </div>
+      </div>}
     </div>
   );
 }

@@ -41,6 +41,19 @@ export const errorHandler: ErrorRequestHandler = (err, _req, res, _next) => {
     return;
   }
 
+  if (
+    typeof err === "object" &&
+    err !== null &&
+    "type" in err &&
+    err.type === "entity.too.large"
+  ) {
+    send(res, 413, {
+      success: false,
+      error: { code: "PAYLOAD_TOO_LARGE", message: "Request payload is too large" },
+    });
+    return;
+  }
+
   logger.error({ err }, "Unhandled error");
   send(res, 500, {
     success: false,

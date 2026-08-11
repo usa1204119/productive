@@ -1,6 +1,5 @@
 import type { Readable } from "node:stream";
 import { setTimeout as delay } from "node:timers/promises";
-import { google, type drive_v3 } from "googleapis";
 import type { OAuth2Client } from "google-auth-library";
 import { AppError } from "../errors.js";
 
@@ -23,6 +22,10 @@ export interface DriveClient {
   uploadFile(params: UploadParams): Promise<UploadResult>;
   getFileMeta(fileId: string): Promise<FileMeta | null>;
   deleteFile(fileId: string): Promise<void>;
+  findPermission?(folderId: string, email: string): Promise<string | null>;
+  createPermission?(folderId: string, email: string, role: "reader" | "writer"): Promise<string>;
+  updatePermission?(folderId: string, permissionId: string, role: "reader" | "writer"): Promise<void>;
+  deletePermission?(folderId: string, permissionId: string): Promise<void>;
 }
 
 export interface UploadParams {
@@ -351,25 +354,21 @@ async function resumableUpload(auth: OAuth2Client, params: UploadParams): Promis
 
 /** Real Drive adapter over googleapis, bound to one user's OAuth client. */
 export function makeGoogleDriveClient(auth: OAuth2Client): DriveClient {
-  // googleapis-common currently pins a different patch of google-auth-library,
-  // so its generated private-field type is nominally incompatible even though
-  // the supported OAuth2Client runtime API is the same. Keep the cast isolated
-  // to this adapter boundary.
-  const drive: drive_v3.Drive = google.drive({
-    version: "v3",
-    auth: auth as never,
-  });
+  const filesUrl = "https://www.googleapis.com/drive/v3/files";
+  const uploadUrl = "https://www.googleapis.com/upload/drive/v3/files";
 
   return {
     async createFolder(name, parentId, appProperties) {
-      const res = await drive.files.create({
-        requestBody: {
+      const res = await auth.request<DriveApiFile>({
+        url: filesUrl,
+        method: "POST",
+        params: { fields: "id" },
+        data: {
           name,
           mimeType: FOLDER_MIME,
           parents: parentId ? [parentId] : undefined,
           appProperties,
         },
-        fields: "id",
       });
       const id = res.data.id;
       if (!id) throw new Error("Drive did not return a folder id");
@@ -386,18 +385,26 @@ export function makeGoogleDriveClient(auth: OAuth2Client): DriveClient {
       ];
       if (parentId) clauses.push(`'${escapeDriveQuery(parentId)}' in parents`);
 
-      const res = await drive.files.list({
-        q: clauses.join(" and "),
-        spaces: "drive",
-        pageSize: 1,
-        fields: "files(id)",
+      const res = await auth.request<{ files?: DriveApiFile[] }>({
+        url: filesUrl,
+        method: "GET",
+        params: {
+          q: clauses.join(" and "),
+          spaces: "drive",
+          pageSize: 1,
+          fields: "files(id)",
+        },
       });
       return res.data.files?.[0]?.id ?? null;
     },
 
     async folderExists(folderId) {
       try {
-        const res = await drive.files.get({ fileId: folderId, fields: "id,trashed" });
+        const res = await auth.request<DriveApiFile & { trashed?: boolean }>({
+          url: `${filesUrl}/${encodeURIComponent(folderId)}`,
+          method: "GET",
+          params: { fields: "id,trashed" },
+        });
         return res.data.trashed !== true;
       } catch (err) {
         if (isMissing(err)) return false;
@@ -410,27 +417,36 @@ export function makeGoogleDriveClient(auth: OAuth2Client): DriveClient {
         return resumableUpload(auth, params);
       }
 
-      const res = await drive.files.create(
-        {
-          requestBody: { name: params.name, parents: [params.folderId] },
-          media: { mimeType: params.mimeType, body: params.body },
-          fields: "id,webViewLink,iconLink",
-        },
-        {
-          signal: params.signal,
-          onUploadProgress: (event: { bytesRead: number }) =>
-            params.onProgress?.(event.bytesRead),
-        },
-      );
+      const bodyParts: Buffer[] = [];
+      for await (const raw of params.body) {
+        bodyParts.push(Buffer.isBuffer(raw) ? raw : Buffer.from(raw as Uint8Array));
+      }
+      const file = Buffer.concat(bodyParts);
+      const boundary = `pac_${Date.now().toString(36)}`;
+      const metadata = JSON.stringify({ name: params.name, parents: [params.folderId] });
+      const multipart = Buffer.concat([
+        Buffer.from(`--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${metadata}\r\n--${boundary}\r\nContent-Type: ${params.mimeType}\r\n\r\n`),
+        file,
+        Buffer.from(`\r\n--${boundary}--\r\n`),
+      ]);
+      const res = await auth.request<DriveApiFile>({
+        url: uploadUrl,
+        method: "POST",
+        params: { uploadType: "multipart", fields: "id,webViewLink,iconLink" },
+        headers: { "Content-Type": `multipart/related; boundary=${boundary}` },
+        data: multipart,
+        signal: params.signal,
+      });
       params.onProgress?.(params.sizeBytes);
       return toUploadResult(res.data);
     },
 
     async getFileMeta(fileId) {
       try {
-        const res = await drive.files.get({
-          fileId,
-          fields: "webViewLink,iconLink,trashed",
+        const res = await auth.request<DriveApiFile & { trashed?: boolean }>({
+          url: `${filesUrl}/${encodeURIComponent(fileId)}`,
+          method: "GET",
+          params: { fields: "webViewLink,iconLink,trashed" },
         });
         if (res.data.trashed === true || !res.data.webViewLink) return null;
         return {
@@ -445,10 +461,51 @@ export function makeGoogleDriveClient(auth: OAuth2Client): DriveClient {
 
     async deleteFile(fileId) {
       try {
-        await drive.files.delete({ fileId });
+        await auth.request({ url: `${filesUrl}/${encodeURIComponent(fileId)}`, method: "DELETE" });
       } catch (err) {
         if (isMissing(err)) return;
         throw err;
+      }
+    },
+
+    async findPermission(folderId, email) {
+      const res = await auth.request<{ permissions?: Array<{ id?: string; emailAddress?: string }> }>({
+        url: `${filesUrl}/${encodeURIComponent(folderId)}/permissions`,
+        method: "GET",
+        params: { fields: "permissions(id,emailAddress)" },
+      });
+      return res.data.permissions?.find(
+        (permission) => permission.emailAddress?.toLowerCase() === email.toLowerCase(),
+      )?.id ?? null;
+    },
+
+    async createPermission(folderId, email, role) {
+      const res = await auth.request<{ id?: string }>({
+        url: `${filesUrl}/${encodeURIComponent(folderId)}/permissions`,
+        method: "POST",
+        params: { sendNotificationEmail: false, fields: "id" },
+        data: { type: "user", role, emailAddress: email },
+      });
+      if (!res.data.id) throw new Error("Drive did not return a permission id");
+      return res.data.id;
+    },
+
+    async updatePermission(folderId, permissionId, role) {
+      await auth.request({
+        url: `${filesUrl}/${encodeURIComponent(folderId)}/permissions/${encodeURIComponent(permissionId)}`,
+        method: "PATCH",
+        data: { role },
+      });
+    },
+
+    async deletePermission(folderId, permissionId) {
+      try {
+        await auth.request({
+          url: `${filesUrl}/${encodeURIComponent(folderId)}/permissions/${encodeURIComponent(permissionId)}`,
+          method: "DELETE",
+        });
+      } catch (error) {
+        if (!isMissing(error)) throw error;
       }
     },
   };

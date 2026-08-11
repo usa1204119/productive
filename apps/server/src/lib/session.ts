@@ -15,6 +15,20 @@ function hashToken(token: string): string {
   return createHash("sha256").update(token).digest("hex");
 }
 
+export async function getUserFromSessionToken(token: string | undefined): Promise<User | null> {
+  if (!token) return null;
+  const session = await prisma.session.findUnique({
+    where: { tokenHash: hashToken(token) },
+    include: { user: true },
+  });
+  if (!session) return null;
+  if (session.expiresAt.getTime() <= Date.now()) {
+    await prisma.session.delete({ where: { id: session.id } }).catch(() => undefined);
+    return null;
+  }
+  return session.user;
+}
+
 export interface CreatedSession {
   sessionId: string;
   token: string;
@@ -54,17 +68,7 @@ export async function getUserFromRequest(req: Request): Promise<User | null> {
   const token = (req.cookies as Record<string, string | undefined>)[env.SESSION_COOKIE_NAME];
   if (!token) return null;
 
-  const session = await prisma.session.findUnique({
-    where: { tokenHash: hashToken(token) },
-    include: { user: true },
-  });
-  if (!session) return null;
-
-  if (session.expiresAt.getTime() <= Date.now()) {
-    await prisma.session.delete({ where: { id: session.id } }).catch(() => undefined);
-    return null;
-  }
-  return session.user;
+  return getUserFromSessionToken(token);
 }
 
 export async function destroySession(req: Request): Promise<void> {

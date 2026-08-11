@@ -1,30 +1,40 @@
-# Single-image build: builds the web app and runs the Express server, which
-# serves BOTH the web app and the API from one origin. Railway/any Docker host.
-FROM node:20-slim
+FROM node:20-slim AS builder
 
-# Prisma engines need openssl.
-RUN apt-get update -y && apt-get install -y openssl && rm -rf /var/lib/apt/lists/*
-
+RUN apt-get update -y && apt-get install -y --no-install-recommends openssl && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 
-# Install deps first (better layer caching). Dev deps are needed at runtime:
-# the server runs via tsx and applies the schema with the Prisma CLI.
 COPY package.json package-lock.json ./
 COPY apps/server/package.json apps/server/
 COPY apps/web/package.json apps/web/
+COPY apps/e2e/package.json apps/e2e/
 COPY packages/shared/package.json packages/shared/
 RUN npm ci
 
 COPY . .
-
-# Generate the Prisma client and build the web app.
 RUN npx prisma generate --schema apps/server/prisma/schema.prisma
-RUN npm run build --workspace apps/web
+RUN npm run build
+
+FROM node:20-slim AS runtime
+
+RUN apt-get update -y && apt-get install -y --no-install-recommends openssl ca-certificates && rm -rf /var/lib/apt/lists/*
+WORKDIR /app
+
+COPY package.json package-lock.json ./
+COPY apps/server/package.json apps/server/
+COPY apps/web/package.json apps/web/
+COPY apps/e2e/package.json apps/e2e/
+COPY packages/shared/package.json packages/shared/
+COPY apps/server/prisma apps/server/prisma
+RUN npm ci --omit=dev
+
+COPY --from=builder /app/node_modules/.prisma /app/node_modules/.prisma
+COPY --from=builder /app/packages/shared/dist packages/shared/dist
+COPY --from=builder /app/apps/server/dist apps/server/dist
+COPY --from=builder /app/apps/web/dist apps/web/dist
+COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+RUN chmod 0555 /usr/local/bin/docker-entrypoint.sh && chown -R node:node /app
 
 ENV NODE_ENV=production
-# Railway injects PORT; the server reads it.
 EXPOSE 4000
-
-# Sync the schema to the database, then start. (For migration history instead,
-# swap `db push` for `db:deploy` once you have committed migrations.)
-CMD ["sh", "-c", "npx prisma db push --schema apps/server/prisma/schema.prisma && npm run start --workspace apps/server"]
+USER node
+ENTRYPOINT ["docker-entrypoint.sh"]

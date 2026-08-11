@@ -4,9 +4,10 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "predev": "npm run build --workspace @plane-and-curves/shared",
     "dev": "tsx watch src/index.ts",
     "build": "tsc",
-    "start": "tsx src/index.ts",
+    "start": "node dist/index.js",
     "typecheck": "tsc --noEmit",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
@@ -25,15 +26,21 @@
   "dependencies": {
     "@plane-and-curves/shared": "*",
     "@prisma/client": "^5.18.0",
+    "@socket.io/redis-adapter": "^8.3.0",
     "cookie-parser": "^1.4.6",
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",
     "express": "^4.19.2",
+    "express-rate-limit": "^8.6.1",
     "google-auth-library": "^10.9.1",
-    "googleapis": "^173.0.0",
+    "helmet": "^8.3.0",
     "pino": "^9.3.2",
     "pino-http": "^10.2.0",
-    "zod": "^3.23.8"
+    "rate-limit-redis": "^6.0.0",
+    "redis": "^6.1.0",
+    "socket.io": "^4.8.3",
+    "zod": "^3.23.8",
+    "prisma": "^5.22.0"
   },
   "devDependencies": {
     "@electric-sql/pglite": "^0.2.17",
@@ -43,7 +50,6 @@
     "@types/node": "^20.14.15",
     "pglite-prisma-adapter": "^0.3.0",
     "pino-pretty": "^11.2.2",
-    "prisma": "^5.18.0",
     "tsx": "^4.17.0",
     "typescript": "^5.5.4"
   }

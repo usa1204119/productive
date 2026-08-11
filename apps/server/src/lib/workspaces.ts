@@ -1,23 +1,38 @@
-import type { PrismaClient, Workspace } from "@prisma/client";
+import type { PrismaClient, Workspace, WorkspaceRole } from "@prisma/client";
 import { MAX_WORKSPACES_PER_USER, type WorkspaceDto } from "@plane-and-curves/shared";
 import { AppError, notFound } from "../errors.js";
 
 const workspaceNotFound = () =>
   new AppError(404, "WORKSPACE_NOT_FOUND", "Workspace not found");
 
-export function toWorkspaceDto(ws: Workspace): WorkspaceDto {
+export function toWorkspaceDto(ws: Workspace, currentRole: WorkspaceRole = "OWNER"): WorkspaceDto {
   return {
     id: ws.id,
     name: ws.name,
     driveFolderId: ws.driveFolderId,
     createdAt: ws.createdAt.toISOString(),
     updatedAt: ws.updatedAt.toISOString(),
+    currentRole,
+    isOwner: currentRole === "OWNER",
   };
 }
 
 /** List the user's workspaces, oldest first. Always scoped to the user. */
-export function listWorkspaces(db: PrismaClient, userId: string): Promise<Workspace[]> {
-  return db.workspace.findMany({ where: { userId }, orderBy: { createdAt: "asc" } });
+export async function listWorkspaces(
+  db: PrismaClient,
+  userId: string,
+): Promise<Array<Workspace & { currentRole: WorkspaceRole }>> {
+  const rows = await db.workspace.findMany({
+    where: { OR: [{ userId }, { members: { some: { userId } } }] },
+    include: { members: { where: { userId }, take: 1 } },
+    orderBy: { createdAt: "asc" },
+  });
+  return rows.flatMap((row) => {
+    const role = row.userId === userId ? "OWNER" : row.members[0]?.role;
+    if (!role) return [];
+    const { members: _members, ...workspace } = row;
+    return [{ ...workspace, currentRole: role }];
+  });
 }
 
 /**
@@ -54,7 +69,11 @@ export function createWorkspace(
         `You can have at most ${MAX_WORKSPACES_PER_USER} workspaces`,
       );
     }
-    return tx.workspace.create({ data: { userId, name } });
+    const workspace = await tx.workspace.create({ data: { userId, name } });
+    await tx.workspaceMember.create({
+      data: { workspaceId: workspace.id, userId, role: "OWNER" },
+    });
+    return workspace;
   });
 }
 

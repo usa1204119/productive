@@ -19,14 +19,15 @@ interface TaskPanelProps {
   task: TaskDto;
   onClose: () => void;
   onViewOnBoard: (boardId: string, elementId: string | null) => void;
+  canEdit: boolean;
 }
 
 /** Right-hand side panel for a single task (not a modal). Escape closes it. */
-export function TaskPanel({ workspaceId, task, onClose, onViewOnBoard }: TaskPanelProps) {
+export function TaskPanel({ workspaceId, task, onClose, onViewOnBoard, canEdit }: TaskPanelProps) {
   const update = useUpdateTask(workspaceId);
   const del = useDeleteTask(workspaceId);
   const { data: user } = useCurrentUser();
-  const canLoadDocuments = Boolean(user && !user.isGuest && user.driveConnected);
+  const canLoadDocuments = Boolean(user && !user.isGuest);
   const documents = useDocuments(workspaceId, canLoadDocuments);
   const attach = useAttachDocument(workspaceId);
   const attachedDocuments =
@@ -51,18 +52,20 @@ export function TaskPanel({ workspaceId, task, onClose, onViewOnBoard }: TaskPan
   }, [onClose]);
 
   const saveTitle = () => {
+    if (!canEdit) return;
     const trimmed = title.trim();
     if (trimmed && trimmed !== task.title) update.mutate({ id: task.id, patch: { title: trimmed } });
     else setTitle(task.title);
   };
 
   const saveDescription = () => {
+    if (!canEdit) return;
     const value = description.trim() === "" ? null : description;
     if (value !== task.description) update.mutate({ id: task.id, patch: { description: value } });
   };
 
   return (
-    <aside className="flex h-full w-96 shrink-0 flex-col border-l border-slate-200 bg-white">
+    <aside className="fixed inset-y-0 right-0 z-30 flex h-full w-full max-w-96 shrink-0 flex-col border-l border-slate-200 bg-white shadow-xl sm:static sm:z-auto sm:shadow-none">
       <div className="flex items-center justify-between border-b border-slate-100 px-4 py-3">
         <span className="text-xs font-semibold uppercase tracking-wide text-slate-400">
           Task details
@@ -77,6 +80,7 @@ export function TaskPanel({ workspaceId, task, onClose, onViewOnBoard }: TaskPan
           <label className="mb-1 block text-xs font-medium text-slate-500">Title</label>
           <input
             value={title}
+            readOnly={!canEdit}
             onChange={(e) => setTitle(e.target.value)}
             onBlur={saveTitle}
             onKeyDown={(e) => {
@@ -90,6 +94,7 @@ export function TaskPanel({ workspaceId, task, onClose, onViewOnBoard }: TaskPan
           <label className="mb-1 block text-xs font-medium text-slate-500">Description</label>
           <textarea
             value={description}
+            readOnly={!canEdit}
             onChange={(e) => setDescription(e.target.value)}
             onBlur={saveDescription}
             rows={4}
@@ -106,6 +111,7 @@ export function TaskPanel({ workspaceId, task, onClose, onViewOnBoard }: TaskPan
           <input
             type="datetime-local"
             value={toLocalInputValue(task.dueAt)}
+            disabled={!canEdit}
             onChange={(e) =>
               update.mutate({ id: task.id, patch: { dueAt: fromLocalInputValue(e.target.value) } })
             }
@@ -153,7 +159,7 @@ export function TaskPanel({ workspaceId, task, onClose, onViewOnBoard }: TaskPan
                       {document.name}
                     </a>
                   )}
-                  <button
+                  {canEdit && <button
                     type="button"
                     onClick={() =>
                       attach.mutate({ documentId: document.id, taskId: null })
@@ -163,7 +169,7 @@ export function TaskPanel({ workspaceId, task, onClose, onViewOnBoard }: TaskPan
                     title="Detach from task"
                   >
                     <Unlink className="h-3.5 w-3.5" />
-                  </button>
+                  </button>}
                 </li>
               ))}
             </ul>
@@ -181,7 +187,7 @@ export function TaskPanel({ workspaceId, task, onClose, onViewOnBoard }: TaskPan
         )}
       </div>
 
-      <div className="border-t border-slate-100 p-4">
+      {canEdit && <div className="border-t border-slate-100 p-4">
         <button
           onClick={() => {
             del.mutate(task.id);
@@ -192,7 +198,7 @@ export function TaskPanel({ workspaceId, task, onClose, onViewOnBoard }: TaskPan
           <Trash2 className="h-4 w-4" />
           Delete task
         </button>
-      </div>
+      </div>}
     </aside>
   );
 }

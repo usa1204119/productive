@@ -13,9 +13,15 @@ export default defineConfig({
   server: {
     port: 5173,
     proxy: {
-      "/auth": "http://localhost:4000",
-      "/workspaces": "http://localhost:4000",
-      "/health": "http://localhost:4000",
+      "/auth": process.env.API_PROXY_TARGET ?? "http://localhost:4000",
+      "/workspaces": process.env.API_PROXY_TARGET ?? "http://localhost:4000",
+      "/workspace-invitations": process.env.API_PROXY_TARGET ?? "http://localhost:4000",
+      "/__e2e": process.env.API_PROXY_TARGET ?? "http://localhost:4000",
+      "/health": process.env.API_PROXY_TARGET ?? "http://localhost:4000",
+      "/socket.io": {
+        target: process.env.API_PROXY_TARGET ?? "http://localhost:4000",
+        ws: true,
+      },
     },
   },
 });

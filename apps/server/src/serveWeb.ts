@@ -5,7 +5,7 @@ import express, { type Express } from "express";
 import { logger } from "./logger.js";
 
 // Paths handled by the API — these must 404 as JSON, not fall through to the SPA.
-const API_PREFIXES = ["/auth", "/workspaces", "/health"];
+const API_PREFIXES = ["/auth", "/workspaces", "/workspace-invitations", "/health"];
 
 /**
  * In production the Express server also serves the built web app, so the whole

@@ -1,13 +1,48 @@
 import { useEffect, useRef, useState, type ComponentProps } from "react";
 import { Excalidraw } from "@excalidraw/excalidraw";
-import { Check, ListPlus, Loader2, Plus, TriangleAlert } from "lucide-react";
+import {
+  DndContext,
+  PointerSensor,
+  closestCenter,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from "@dnd-kit/core";
+import {
+  SortableContext,
+  arrayMove,
+  useSortable,
+  verticalListSortingStrategy,
+} from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
+import {
+  Check,
+  ChevronLeft,
+  ChevronRight,
+  GripVertical,
+  ListPlus,
+  Loader2,
+  MoreHorizontal,
+  Pencil,
+  Plus,
+  Trash2,
+  TriangleAlert,
+} from "lucide-react";
 import type { BoardElementInput, BoardSummaryDto, BridgeResultDto, WorkspaceDto } from "@plane-and-curves/shared";
-import { useBoard, useBoards, useCreateBoard } from "../lib/boards.js";
+import {
+  useBoard,
+  useBoards,
+  useCreateBoard,
+  useDeleteBoard,
+  useRenameBoard,
+  useReorderBoard,
+} from "../lib/boards.js";
 import { useSceneSaver } from "../lib/useSceneSaver.js";
 import { useCreateTasksFromSelection } from "../lib/bridge.js";
 import type { SaveStatus } from "../lib/sceneSaver.js";
+import { ConfirmDialog } from "./ConfirmDialog.js";
 
-/** A request from the Tasks tab to open a board and focus a specific element. */
+/** A request from the Tasks tab to open a slide and focus a specific element. */
 export interface BoardFocusRequest {
   boardId: string;
   elementId: string;
@@ -23,15 +58,16 @@ interface WhiteboardTabProps {
   onFocusHandled?: () => void;
 }
 
-/** Whiteboard tab: the board switcher lives inside Excalidraw's top toolbar. */
+/** Whiteboard tab: a left slide rail + the Excalidraw canvas. */
 export function WhiteboardTab({ workspace, focus, onFocusHandled }: WhiteboardTabProps) {
   const { data: boards = [], isLoading } = useBoards(workspace.id);
   const create = useCreateBoard(workspace.id);
   const [boardId, setBoardId] = useState<string | null>(null);
+  const canEdit = workspace.currentRole !== "VIEWER";
 
   const storageKey = `pac.board.${workspace.id}`;
 
-  // Pick a board: a pending focus target wins, else remembered, else most recent.
+  // Pick a slide: a pending focus target wins, else remembered, else the first.
   useEffect(() => {
     if (boards.length === 0) {
       setBoardId(null);
@@ -52,68 +88,366 @@ export function WhiteboardTab({ workspace, focus, onFocusHandled }: WhiteboardTa
   };
 
   const onNewBoard = () => {
-    create.mutate(`Board ${boards.length + 1}`, { onSuccess: (b) => select(b.id) });
+    if (!canEdit) return;
+    create.mutate(`Slide ${boards.length + 1}`, { onSuccess: (b) => select(b.id) });
   };
 
-  if (isLoading) return <FullMessage>Loading boards…</FullMessage>;
+  const onDeleted = (deletedId: string) => {
+    const remaining = boards.filter((board) => board.id !== deletedId);
+    if (deletedId !== boardId) return; // deleting a non-active slide keeps the view
+    if (remaining[0]) select(remaining[0].id);
+    else {
+      setBoardId(null);
+      localStorage.removeItem(storageKey);
+    }
+  };
 
-  if (boards.length === 0) {
+  if (isLoading) return <FullMessage>Loading slides…</FullMessage>;
+
+  return (
+    <div className="flex h-full min-h-0">
+      <SlideRail
+        workspaceId={workspace.id}
+        boards={boards}
+        activeId={boardId}
+        canEdit={canEdit}
+        creating={create.isPending}
+        onSelect={select}
+        onNewBoard={onNewBoard}
+        onDeleted={onDeleted}
+      />
+      <div className="relative min-w-0 flex-1">
+        {boards.length === 0 ? (
+          <FullMessage>
+            <div className="text-center">
+              <p className="text-sm text-slate-500">No slides yet.</p>
+              {canEdit && (
+                <button
+                  onClick={onNewBoard}
+                  disabled={create.isPending}
+                  className="mt-3 inline-flex items-center gap-2 rounded-lg bg-accent px-4 py-2 text-sm font-medium text-white transition hover:bg-accent-hover disabled:opacity-60"
+                >
+                  <Plus className="h-4 w-4" />
+                  {create.isPending ? "Creating…" : "New slide"}
+                </button>
+              )}
+            </div>
+          </FullMessage>
+        ) : boardId ? (
+          <BoardCanvas
+            key={boardId}
+            workspaceId={workspace.id}
+            boardId={boardId}
+            canEdit={canEdit}
+            focus={focus && focus.boardId === boardId ? focus : null}
+            onFocusHandled={onFocusHandled}
+          />
+        ) : (
+          <FullMessage>Select a slide.</FullMessage>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/** Left rail: list/add/rename/delete/reorder slides. Collapsible. */
+function SlideRail({
+  workspaceId,
+  boards,
+  activeId,
+  canEdit,
+  creating,
+  onSelect,
+  onNewBoard,
+  onDeleted,
+}: {
+  workspaceId: string;
+  boards: BoardSummaryDto[];
+  activeId: string | null;
+  canEdit: boolean;
+  creating: boolean;
+  onSelect: (id: string) => void;
+  onNewBoard: () => void;
+  onDeleted: (id: string) => void;
+}) {
+  const rename = useRenameBoard(workspaceId);
+  const del = useDeleteBoard(workspaceId);
+  const reorder = useReorderBoard(workspaceId);
+  const collapseKey = `pac.rail.${workspaceId}`;
+
+  const [collapsed, setCollapsed] = useState(() => localStorage.getItem(collapseKey) === "1");
+  const [renamingId, setRenamingId] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState<BoardSummaryDto | null>(null);
+
+  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 4 } }));
+
+  const toggle = () => {
+    setCollapsed((c) => {
+      const next = !c;
+      localStorage.setItem(collapseKey, next ? "1" : "0");
+      return next;
+    });
+  };
+
+  const onDragEnd = (event: DragEndEvent) => {
+    const { active, over } = event;
+    if (!over || active.id === over.id) return;
+    const oldIndex = boards.findIndex((b) => b.id === active.id);
+    const newIndex = boards.findIndex((b) => b.id === over.id);
+    if (oldIndex < 0 || newIndex < 0) return;
+    const seq = arrayMove(boards, oldIndex, newIndex);
+    const idx = seq.findIndex((b) => b.id === active.id);
+    reorder.mutate({
+      id: String(active.id),
+      prevId: seq[idx - 1]?.id ?? null,
+      nextId: seq[idx + 1]?.id ?? null,
+    });
+  };
+
+  if (collapsed) {
     return (
-      <FullMessage>
-        <div className="text-center">
-          <p className="text-sm text-slate-500">No boards yet.</p>
+      <div className="flex h-full w-10 shrink-0 flex-col items-center gap-2 border-r border-slate-200 bg-white py-2">
+        <button
+          onClick={toggle}
+          title="Show slides"
+          aria-label="Show slides"
+          className="rounded-lg p-1.5 text-slate-500 hover:bg-slate-100 hover:text-slate-700"
+        >
+          <ChevronRight className="h-4 w-4" />
+        </button>
+        {canEdit && (
           <button
             onClick={onNewBoard}
-            disabled={create.isPending}
-            className="mt-3 inline-flex items-center gap-2 rounded-lg bg-accent px-4 py-2 text-sm font-medium text-white transition hover:bg-accent-hover disabled:opacity-60"
+            disabled={creating}
+            title="New slide"
+            aria-label="New slide"
+            className="rounded-lg p-1.5 text-slate-500 hover:bg-slate-100 hover:text-slate-700 disabled:opacity-60"
           >
             <Plus className="h-4 w-4" />
-            {create.isPending ? "Creating…" : "New board"}
           </button>
-        </div>
-      </FullMessage>
+        )}
+      </div>
     );
   }
 
-  if (!boardId) return <FullMessage>Select a board.</FullMessage>;
+  return (
+    <aside className="flex h-full w-56 shrink-0 flex-col border-r border-slate-200 bg-white">
+      <div className="flex items-center justify-between px-3 py-2">
+        <span className="text-xs font-semibold uppercase tracking-wide text-slate-400">Slides</span>
+        <button
+          onClick={toggle}
+          title="Hide slides"
+          aria-label="Hide slides"
+          className="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600"
+        >
+          <ChevronLeft className="h-4 w-4" />
+        </button>
+      </div>
+
+      <div className="min-h-0 flex-1 overflow-y-auto px-2">
+        <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd}>
+          <SortableContext items={boards.map((b) => b.id)} strategy={verticalListSortingStrategy}>
+            <ul className="space-y-1">
+              {boards.map((b, i) => (
+                <SlideRow
+                  key={b.id}
+                  index={i + 1}
+                  board={b}
+                  active={b.id === activeId}
+                  canEdit={canEdit}
+                  renaming={renamingId === b.id}
+                  onSelect={() => onSelect(b.id)}
+                  onStartRename={() => setRenamingId(b.id)}
+                  onSubmitRename={(name) => {
+                    const trimmed = name.trim();
+                    if (trimmed && trimmed !== b.name) rename.mutate({ id: b.id, name: trimmed });
+                    setRenamingId(null);
+                  }}
+                  onCancelRename={() => setRenamingId(null)}
+                  onDelete={() => setDeleting(b)}
+                />
+              ))}
+            </ul>
+          </SortableContext>
+        </DndContext>
+      </div>
+
+      {canEdit && (
+        <div className="border-t border-slate-100 p-2">
+          <button
+            onClick={onNewBoard}
+            disabled={creating}
+            className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:opacity-60"
+          >
+            <Plus className="h-4 w-4" />
+            New slide
+          </button>
+        </div>
+      )}
+
+      {deleting && (
+        <ConfirmDialog
+          title={`Delete “${deleting.name}”?`}
+          destructive
+          confirmLabel="Delete slide"
+          busy={del.isPending}
+          onCancel={() => setDeleting(null)}
+          onConfirm={() =>
+            del.mutate(deleting.id, {
+              onSuccess: () => {
+                onDeleted(deleting.id);
+                setDeleting(null);
+              },
+            })
+          }
+          body="The slide is removed. Tasks created from it survive, but their board back-links are cleared."
+        />
+      )}
+    </aside>
+  );
+}
+
+function SlideRow({
+  index,
+  board,
+  active,
+  canEdit,
+  renaming,
+  onSelect,
+  onStartRename,
+  onSubmitRename,
+  onCancelRename,
+  onDelete,
+}: {
+  index: number;
+  board: BoardSummaryDto;
+  active: boolean;
+  canEdit: boolean;
+  renaming: boolean;
+  onSelect: () => void;
+  onStartRename: () => void;
+  onSubmitRename: (name: string) => void;
+  onCancelRename: () => void;
+  onDelete: () => void;
+}) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
+    id: board.id,
+    disabled: !canEdit,
+  });
+  const style = { transform: CSS.Transform.toString(transform), transition };
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [draft, setDraft] = useState(board.name);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (renaming) setDraft(board.name);
+  }, [renaming, board.name]);
+
+  useEffect(() => {
+    if (!menuOpen) return;
+    const onDoc = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) setMenuOpen(false);
+    };
+    document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
+  }, [menuOpen]);
+
+  if (renaming) {
+    return (
+      <li className="flex items-center gap-1 rounded-lg px-1 py-1">
+        <input
+          autoFocus
+          value={draft}
+          maxLength={100}
+          onChange={(e) => setDraft(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") onSubmitRename(draft);
+            if (e.key === "Escape") onCancelRename();
+          }}
+          onBlur={() => onSubmitRename(draft)}
+          className="min-w-0 flex-1 rounded border border-slate-300 px-2 py-1 text-sm outline-none focus:border-accent"
+        />
+      </li>
+    );
+  }
 
   return (
-    <BoardCanvas
-      key={boardId}
-      workspaceId={workspace.id}
-      boardId={boardId}
-      boards={boards}
-      creating={create.isPending}
-      onSelect={select}
-      onNewBoard={onNewBoard}
-      focus={focus && focus.boardId === boardId ? focus : null}
-      onFocusHandled={onFocusHandled}
-    />
+    <li
+      ref={setNodeRef}
+      style={style}
+      className={`group flex items-center gap-1 rounded-lg border px-1.5 py-1.5 ${
+        active ? "border-accent/40 bg-accent/5" : "border-transparent hover:bg-slate-50"
+      } ${isDragging ? "opacity-60 shadow-sm" : ""}`}
+    >
+      {canEdit && (
+        <button
+          {...attributes}
+          {...listeners}
+          className="cursor-grab touch-none text-slate-300 opacity-0 transition group-hover:opacity-100"
+          aria-label="Drag to reorder slide"
+        >
+          <GripVertical className="h-4 w-4" />
+        </button>
+      )}
+      <button onClick={onSelect} className="flex min-w-0 flex-1 items-center gap-2 text-left">
+        <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded bg-slate-100 text-[10px] font-medium text-slate-500">
+          {index}
+        </span>
+        <span className={`min-w-0 truncate text-sm ${active ? "text-accent" : "text-slate-700"}`}>
+          {board.name}
+        </span>
+      </button>
+
+      {canEdit && (
+        <div ref={menuRef} className="relative">
+          <button
+            onClick={() => setMenuOpen((v) => !v)}
+            className="rounded p-1 text-slate-400 opacity-0 transition hover:bg-slate-100 hover:text-slate-600 group-hover:opacity-100"
+            aria-label="Slide options"
+            aria-expanded={menuOpen}
+          >
+            <MoreHorizontal className="h-4 w-4" />
+          </button>
+          {menuOpen && (
+            <div className="absolute right-0 top-7 z-30 w-32 rounded-lg border border-slate-200 bg-white py-1 shadow-lg">
+              <button
+                onClick={() => {
+                  setMenuOpen(false);
+                  onStartRename();
+                }}
+                className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-50"
+              >
+                <Pencil className="h-4 w-4" />
+                Rename
+              </button>
+              <button
+                onClick={() => {
+                  setMenuOpen(false);
+                  onDelete();
+                }}
+                className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-rose-600 hover:bg-rose-50"
+              >
+                <Trash2 className="h-4 w-4" />
+                Delete
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+    </li>
   );
 }
 
 interface BoardCanvasProps {
   workspaceId: string;
   boardId: string;
-  boards: BoardSummaryDto[];
-  creating: boolean;
-  onSelect: (id: string) => void;
-  onNewBoard: () => void;
+  canEdit: boolean;
   focus: BoardFocusRequest | null;
   onFocusHandled?: () => void;
 }
 
-function BoardCanvas({
-  workspaceId,
-  boardId,
-  boards,
-  creating,
-  onSelect,
-  onNewBoard,
-  focus,
-  onFocusHandled,
-}: BoardCanvasProps) {
-  const { data: board, isLoading, isError } = useBoard(workspaceId, boardId);
+function BoardCanvas({ workspaceId, boardId, canEdit, focus, onFocusHandled }: BoardCanvasProps) {
+  const { data: board, isLoading, isError, refetch } = useBoard(workspaceId, boardId);
   const saver = useSceneSaver(workspaceId, boardId);
   const addToTasks = useCreateTasksFromSelection(workspaceId);
   const apiRef = useRef<ExcalidrawAPI | null>(null);
@@ -125,22 +459,19 @@ function BoardCanvas({
 
   const showToast = (kind: "ok" | "warn", text: string) => setToast({ kind, text });
 
-  // Seed the saved version from the loaded scene so an untouched board isn't re-saved.
   useEffect(() => {
     if (board && !primed.current) {
-      saver.prime(board.elements);
+      saver.prime(board.elements, board.revision);
       primed.current = true;
     }
   }, [board, saver]);
 
-  // Auto-dismiss the toast.
   useEffect(() => {
     if (!toast) return;
     const t = setTimeout(() => setToast(null), 3500);
     return () => clearTimeout(t);
   }, [toast]);
 
-  // Focus request from a task's board back-link: zoom to and select the element.
   useEffect(() => {
     if (!focus || focusDone.current) return;
     const api = apiRef.current;
@@ -148,7 +479,7 @@ function BoardCanvas({
     focusDone.current = true;
     const target = api.getSceneElements().find((e) => e.id === focus.elementId);
     if (!target) {
-      showToast("warn", "That element no longer exists on this board.");
+      showToast("warn", "That element no longer exists on this slide.");
     } else {
       api.scrollToContent(target, { fitToContent: true, animate: true });
       api.updateScene({ appState: { selectedElementIds: { [focus.elementId]: true } } });
@@ -157,6 +488,7 @@ function BoardCanvas({
   }, [focus, board, onFocusHandled]);
 
   const onAddToTasks = () => {
+    if (!canEdit) return;
     const api = apiRef.current;
     if (!api) return;
     const selectedIds = api.getAppState().selectedElementIds;
@@ -175,18 +507,27 @@ function BoardCanvas({
     );
   };
 
-  if (isLoading) return <FullMessage>Loading board…</FullMessage>;
-  if (isError || !board) return <FullMessage>Could not load this board.</FullMessage>;
+  const reloadLatest = async () => {
+    const latest = await refetch();
+    if (!latest.data || !apiRef.current) return;
+    apiRef.current.updateScene({
+      elements: latest.data.elements as never,
+      appState: sanitizeAppState(latest.data.appState) as never,
+    });
+    apiRef.current.addFiles(Object.values(latest.data.files ?? {}) as never);
+    saver.acceptLatest(latest.data.elements, latest.data.revision);
+  };
+
+  if (isLoading) return <FullMessage>Loading slide…</FullMessage>;
+  if (isError || !board) return <FullMessage>Could not load this slide.</FullMessage>;
 
   return (
     <div className="relative h-full min-h-0">
-      {/* Saved indicator — bottom-centre so it never covers Excalidraw's UI. */}
       <div className="pointer-events-none absolute bottom-3 left-1/2 z-20 -translate-x-1/2">
         <SaveChip status={saver.status} onRetry={saver.retryNow} />
       </div>
 
-      {/* Floating "Add to tasks" — appears only when elements are selected. */}
-      {selectedCount > 0 && (
+      {canEdit && selectedCount > 0 && (
         <div className="absolute bottom-14 left-1/2 z-20 -translate-x-1/2">
           <button
             onClick={onAddToTasks}
@@ -217,16 +558,8 @@ function BoardCanvas({
       )}
 
       <Excalidraw
+        viewModeEnabled={!canEdit}
         excalidrawAPI={(api) => (apiRef.current = api)}
-        renderTopRightUI={() => (
-          <BoardBar
-            boards={boards}
-            boardId={boardId}
-            creating={creating}
-            onSelect={onSelect}
-            onNewBoard={onNewBoard}
-          />
-        )}
         initialData={{
           elements: Array.isArray(board.elements) ? (board.elements as never) : ([] as never),
           appState: sanitizeAppState(board.appState as Record<string, unknown>) as never,
@@ -244,47 +577,13 @@ function BoardCanvas({
           });
         }}
       />
-    </div>
-  );
-}
 
-/** Board switcher + New Board, rendered inside Excalidraw's top toolbar. */
-function BoardBar({
-  boards,
-  boardId,
-  creating,
-  onSelect,
-  onNewBoard,
-}: {
-  boards: BoardSummaryDto[];
-  boardId: string;
-  creating: boolean;
-  onSelect: (id: string) => void;
-  onNewBoard: () => void;
-}) {
-  return (
-    <div className="flex items-center gap-1.5">
-      <select
-        value={boardId}
-        onChange={(e) => onSelect(e.target.value)}
-        aria-label="Switch board"
-        className="h-9 max-w-[10rem] rounded-lg border border-slate-200 bg-white px-2 text-sm text-slate-700 outline-none focus:border-accent"
-      >
-        {boards.map((b) => (
-          <option key={b.id} value={b.id}>
-            {b.name}
-          </option>
-        ))}
-      </select>
-      <button
-        onClick={onNewBoard}
-        disabled={creating}
-        title="New board"
-        aria-label="New board"
-        className="flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-600 transition hover:bg-slate-50 disabled:opacity-60"
-      >
-        <Plus className="h-4 w-4" />
-      </button>
+      {saver.status === "conflict" && (
+        <ConflictDialog
+          onReload={() => void reloadLatest()}
+          onOverwrite={() => void saver.overwriteNow()}
+        />
+      )}
     </div>
   );
 }
@@ -292,8 +591,7 @@ function BoardBar({
 /**
  * Excalidraw's `collaborators` is a Map at runtime. Once persisted as JSON it
  * comes back as a plain object, and Excalidraw's restore calls `.forEach` on it
- * -> "forEach is not a function". Strip it (Excalidraw rebuilds an empty Map),
- * both when loading a scene and before saving one. Element data is untouched.
+ * -> "forEach is not a function". Strip it (Excalidraw rebuilds an empty Map).
  */
 function sanitizeAppState(appState: Record<string, unknown>): Record<string, unknown> {
   if (!appState || typeof appState !== "object") return {};
@@ -315,14 +613,16 @@ function summarize(res: BridgeResultDto): string {
 function SaveChip({ status, onRetry }: { status: SaveStatus; onRetry: () => void }) {
   if (status === "idle") return null;
 
-  if (status === "error") {
+  if (status === "error" || status === "conflict") {
     return (
       <span className="pointer-events-auto inline-flex items-center gap-1.5 rounded-full bg-rose-50 px-3 py-1 text-xs font-medium text-rose-700 shadow-sm">
         <TriangleAlert className="h-3.5 w-3.5" />
-        Save failed
-        <button onClick={onRetry} className="ml-1 underline underline-offset-2 hover:no-underline">
-          Retry
-        </button>
+        {status === "conflict" ? "Save conflict" : "Save failed"}
+        {status === "error" && (
+          <button onClick={onRetry} className="ml-1 underline underline-offset-2 hover:no-underline">
+            Retry
+          </button>
+        )}
       </span>
     );
   }
@@ -341,6 +641,21 @@ function SaveChip({ status, onRetry }: { status: SaveStatus; onRetry: () => void
       <Loader2 className="h-3.5 w-3.5 animate-spin" />
       Saving…
     </span>
+  );
+}
+
+function ConflictDialog({ onReload, onOverwrite }: { onReload: () => void; onOverwrite: () => void }) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/30 p-4">
+      <div role="alertdialog" aria-modal="true" aria-labelledby="board-conflict-title" className="w-full max-w-md rounded-2xl bg-white p-6 shadow-lg">
+        <h2 id="board-conflict-title" className="font-semibold text-slate-800">Another collaborator changed this slide</h2>
+        <p className="mt-2 text-sm text-slate-600">Your unsaved version is still held in this browser. Reload the latest slide, or deliberately overwrite it with your local version.</p>
+        <div className="mt-6 flex justify-end gap-2">
+          <button type="button" onClick={onReload} className="rounded-lg px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100">Reload latest</button>
+          <button type="button" onClick={onOverwrite} className="rounded-lg bg-amber-600 px-4 py-2 text-sm font-medium text-white hover:bg-amber-700">Overwrite latest</button>
+        </div>
+      </div>
+    </div>
   );
 }
 

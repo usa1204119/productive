@@ -29,5 +29,7 @@ export const workspaceDtoSchema = z.object({
   driveFolderId: z.string().nullable(),
   createdAt: z.string(),
   updatedAt: z.string(),
+  currentRole: z.enum(["OWNER", "EDITOR", "VIEWER"]),
+  isOwner: z.boolean(),
 });
 export type WorkspaceDto = z.infer<typeof workspaceDtoSchema>;

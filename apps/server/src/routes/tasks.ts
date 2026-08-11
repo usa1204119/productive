@@ -7,7 +7,7 @@ import {
 } from "@plane-and-curves/shared";
 import { prisma } from "../db.js";
 import { requireAuth } from "../middleware/auth.js";
-import { requireWorkspace } from "../middleware/workspace.js";
+import { requireWorkspaceAccess, requireWorkspaceRole } from "../middleware/workspace.js";
 import { validateBody, validateParams } from "../middleware/validate.js";
 import { ok } from "../lib/respond.js";
 import {
@@ -18,11 +18,12 @@ import {
   toTaskDto,
   updateTask,
 } from "../lib/tasks.js";
+import { emitWorkspaceEvent } from "../collaboration/hub.js";
 
 // Mounted at /workspaces/:workspaceId/tasks — mergeParams exposes :workspaceId.
 export const tasksRouter = Router({ mergeParams: true });
 
-tasksRouter.use(requireAuth, requireWorkspace);
+tasksRouter.use(requireAuth, requireWorkspaceAccess);
 
 /** List all tasks in the workspace, in list order. */
 tasksRouter.get("/", async (req, res, next) => {
@@ -35,10 +36,11 @@ tasksRouter.get("/", async (req, res, next) => {
 });
 
 /** Add a task (appended to the end). */
-tasksRouter.post("/", validateBody(createTaskSchema), async (req, res, next) => {
+tasksRouter.post("/", requireWorkspaceRole("EDITOR"), validateBody(createTaskSchema), async (req, res, next) => {
   try {
     const { title } = req.body as { title: string };
     const task = await createTask(prisma, req.workspace!.id, title);
+    emitWorkspaceEvent(req.workspace!.id, { type: "task.created", entityId: task.id, actorUserId: req.user!.id });
     ok(res, toTaskDto(task), 201);
   } catch (err) {
     next(err);
@@ -49,10 +51,12 @@ tasksRouter.post("/", validateBody(createTaskSchema), async (req, res, next) => 
 tasksRouter.patch(
   "/:taskId",
   validateParams(taskParamsSchema),
+  requireWorkspaceRole("EDITOR"),
   validateBody(updateTaskSchema),
   async (req, res, next) => {
     try {
       const task = await updateTask(prisma, req.workspace!.id, req.params.taskId!, req.body);
+      emitWorkspaceEvent(req.workspace!.id, { type: "task.updated", entityId: task.id, actorUserId: req.user!.id });
       ok(res, toTaskDto(task));
     } catch (err) {
       next(err);
@@ -64,11 +68,13 @@ tasksRouter.patch(
 tasksRouter.post(
   "/:taskId/reorder",
   validateParams(taskParamsSchema),
+  requireWorkspaceRole("EDITOR"),
   validateBody(reorderTaskSchema),
   async (req, res, next) => {
     try {
       const { prevId, nextId } = req.body as { prevId: string | null; nextId: string | null };
       const task = await reorderTask(prisma, req.workspace!.id, req.params.taskId!, prevId, nextId);
+      emitWorkspaceEvent(req.workspace!.id, { type: "task.reordered", entityId: task.id, actorUserId: req.user!.id });
       ok(res, toTaskDto(task));
     } catch (err) {
       next(err);
@@ -77,9 +83,10 @@ tasksRouter.post(
 );
 
 /** Delete a task (detaches its documents; does not delete them). */
-tasksRouter.delete("/:taskId", validateParams(taskParamsSchema), async (req, res, next) => {
+tasksRouter.delete("/:taskId", validateParams(taskParamsSchema), requireWorkspaceRole("EDITOR"), async (req, res, next) => {
   try {
     await deleteTask(prisma, req.workspace!.id, req.params.taskId!);
+    emitWorkspaceEvent(req.workspace!.id, { type: "task.deleted", entityId: req.params.taskId, actorUserId: req.user!.id });
     ok(res, { deleted: true });
   } catch (err) {
     next(err);

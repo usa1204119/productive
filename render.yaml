@@ -11,7 +11,7 @@ services:
     dockerfilePath: ./Dockerfile
     dockerContext: .
     healthCheckPath: /health
-    autoDeployTrigger: commit
+    autoDeployTrigger: off
     envVars:
       - key: NODE_ENV
         value: production
@@ -33,4 +33,19 @@ services:
       - key: GOOGLE_OAUTH_REDIRECT_URI # https://<your-app>.onrender.com/auth/google/callback
         sync: false
       - key: GOOGLE_DRIVE_REDIRECT_URI # https://<your-app>.onrender.com/auth/google/drive/callback
+        sync: false
+      # Sharing is OFF until the feature is finished + a Resend key is set.
+      # In production, SHARING_ENABLED=true REQUIRES RESEND_API_KEY and MAIL_FROM
+      # (see apps/server/src/env.ts) — flip to "true" only after setting those.
+      - key: SHARING_ENABLED
+        value: "false"
+      - key: MAIL_PROVIDER
+        value: resend
+      - key: RESEND_API_KEY
+        sync: false
+      - key: MAIL_FROM
+        sync: false
+      - key: INVITE_TTL_HOURS
+        value: "168"
+      - key: REDIS_URL
         sync: false

@@ -101,9 +101,29 @@ export async function ensureWorkspaceFolder(
         [property.key]: property.value,
       }));
 
-    await db.workspace.update({
-      where: { id: workspaceId },
-      data: { driveFolderId: id },
+    await db.$transaction(async (tx) => {
+      await tx.workspace.update({ where: { id: workspaceId }, data: { driveFolderId: id } });
+      const members = await tx.workspaceMember.findMany({
+        where: { workspaceId, role: { in: ["EDITOR", "VIEWER"] } },
+        include: { user: { select: { email: true } } },
+      });
+      for (const member of members) {
+        if (!member.user.email) continue;
+        await tx.workspaceMember.update({
+          where: { id: member.id },
+          data: { aclSyncStatus: "PENDING", aclSyncError: null },
+        });
+        await tx.driveAclSyncJob.create({
+          data: {
+            workspaceId,
+            memberId: member.id,
+            action: "GRANT",
+            emailNormalized: member.user.email.toLowerCase(),
+            desiredRole: member.role,
+            permissionId: member.drivePermissionId,
+          },
+        });
+      }
     });
     return id;
   });
@@ -151,6 +171,8 @@ export async function listDocuments(
 
 export interface UploadInput {
   userId: string;
+  /** Canonical workspace owner's credential owns the shared Drive folder. */
+  driveOwnerId?: string;
   workspaceId: string;
   name: string;
   mimeType: string;
@@ -219,7 +241,7 @@ export async function uploadDocument(
     throw new DOMException("Upload cancelled", "AbortError");
   }
 
-  const rootId = await ensureRootFolder(db, drive, input.userId);
+  const rootId = await ensureRootFolder(db, drive, input.driveOwnerId ?? input.userId);
   const folderId = await ensureWorkspaceFolder(db, drive, input.workspaceId, rootId);
   const guarded = sizeGuardedBody(input.body, input.sizeBytes, maxBytes);
 
