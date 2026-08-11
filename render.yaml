@@ -11,7 +11,10 @@ services:
     dockerfilePath: ./Dockerfile
     dockerContext: .
     healthCheckPath: /health
-    autoDeployTrigger: off
+    # Auto-deploy on every push to the connected branch. (Takes effect once this
+    # blueprint change is synced by the next deploy; flip it in the dashboard too
+    # under Settings -> Build & Deploy -> Auto-Deploy if it doesn't pick up.)
+    autoDeployTrigger: commit
     envVars:
       - key: NODE_ENV
         value: production
