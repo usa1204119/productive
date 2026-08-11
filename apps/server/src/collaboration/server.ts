@@ -25,53 +25,17 @@ interface JoinPayload {
 const sections = new Set(["whiteboard", "tasks", "documents"]);
 const presence = new Map<string, Map<string, PresenceEntry>>();
 
-// Live whiteboard co-editing state (per board). `boardEditors` keeps the ordered
-// list of editor sockets in each board room; the first is the "save leader" that
-// persists the merged scene so N editors never fight the board revision.
-const boardEditors = new Map<string, string[]>();
-const boardLeaders = new Map<string, string>();
-
 let pubClient: RedisClientType | null = null;
 let subClient: RedisClientType | null = null;
 
-/** Recompute a board's leader and notify sockets whose leadership changed. */
-function refreshLeader(io: SocketServer, boardId: string, joiningSocketId?: string): void {
-  const newLeader = (boardEditors.get(boardId) ?? [])[0];
-  const oldLeader = boardLeaders.get(boardId);
-  if (newLeader !== oldLeader) {
-    if (oldLeader) io.to(oldLeader).emit("board:role", { boardId, isLeader: false });
-    if (newLeader) {
-      boardLeaders.set(boardId, newLeader);
-      io.to(newLeader).emit("board:role", { boardId, isLeader: true });
-    } else {
-      boardLeaders.delete(boardId);
-    }
-  }
-  // A newly-joined follower/viewer would otherwise never learn its (non-)leader
-  // status, so always tell the joiner explicitly.
-  if (joiningSocketId) {
-    io.to(joiningSocketId).emit("board:role", {
-      boardId,
-      isLeader: boardLeaders.get(boardId) === joiningSocketId,
-    });
-  }
-}
-
-/** Remove a socket from a board room, promote a new leader, and clear its cursor. */
-function leaveBoard(io: SocketServer, socket: Socket, boardId: string): void {
+/** Remove a socket from a board room and clear its cursor for peers. */
+function leaveBoard(socket: Socket, boardId: string): void {
   const boards = socket.data.boards as Set<string> | undefined;
   if (!boards?.has(boardId)) return;
   boards.delete(boardId);
   (socket.data.canEditBoard as Set<string> | undefined)?.delete(boardId);
   void socket.leave(`board:${boardId}`);
-  const editors = boardEditors.get(boardId);
-  if (editors) {
-    const next = editors.filter((id) => id !== socket.id);
-    if (next.length) boardEditors.set(boardId, next);
-    else boardEditors.delete(boardId);
-  }
   socket.to(`board:${boardId}`).emit("board:cursor-gone", { boardId, socketId: socket.id });
-  refreshLeader(io, boardId);
 }
 
 function cookieValue(header: string | undefined, name: string): string | undefined {
@@ -206,23 +170,20 @@ export async function createCollaborationServer(httpServer: HttpServer): Promise
       boards.add(boardId);
       await socket.join(`board:${boardId}`);
 
+      // Track edit rights per board so board:update/files can be gated to editors.
+      // Persistence is no longer routed through a leader — every editor saves and
+      // the server merges — so there is no leader election here.
       const canEdit = access.role === "EDITOR" || access.role === "OWNER";
       const canEditBoard =
         (socket.data.canEditBoard as Set<string> | undefined) ?? new Set<string>();
       socket.data.canEditBoard = canEditBoard;
-      if (canEdit) {
-        canEditBoard.add(boardId);
-        const editors = boardEditors.get(boardId) ?? [];
-        if (!editors.includes(socket.id)) editors.push(socket.id);
-        boardEditors.set(boardId, editors);
-      }
-      refreshLeader(io, boardId, socket.id);
+      if (canEdit) canEditBoard.add(boardId);
       ack?.({ ok: true, role: access.role });
     });
 
     socket.on("board:unsubscribe", (raw: unknown) => {
       const parsed = boardUnsubscribeSchema.safeParse(raw);
-      if (parsed.success) leaveBoard(io, socket, parsed.data.boardId);
+      if (parsed.success) leaveBoard(socket, parsed.data.boardId);
     });
 
     socket.on("board:update", (raw: unknown) => {
@@ -260,7 +221,7 @@ export async function createCollaborationServer(httpServer: HttpServer): Promise
 
     socket.on("disconnect", () => {
       for (const boardId of [...((socket.data.boards as Set<string> | undefined) ?? [])]) {
-        leaveBoard(io, socket, boardId);
+        leaveBoard(socket, boardId);
       }
       removePresence(io, socket);
     });

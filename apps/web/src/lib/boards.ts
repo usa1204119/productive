@@ -3,7 +3,7 @@ import type { BoardDto, BoardSummaryDto } from "@plane-and-curves/shared";
 import { api } from "./api.js";
 
 const boardsKey = (workspaceId: string) => ["boards", workspaceId] as const;
-const boardKey = (workspaceId: string, boardId: string) => ["board", workspaceId, boardId] as const;
+export const boardKey = (workspaceId: string, boardId: string) => ["board", workspaceId, boardId] as const;
 
 export function useBoards(workspaceId: string) {
   return useQuery<BoardSummaryDto[]>({

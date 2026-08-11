@@ -3,7 +3,6 @@ import type {
   BoardCursorGoneMessage,
   BoardCursorMessage,
   BoardFilesMessage,
-  BoardRoleMessage,
   BoardUpdateMessage,
 } from "@plane-and-curves/shared";
 import { socket } from "./collaboration.js";
@@ -44,7 +43,7 @@ export function useBoardLiveSync(params: {
   const canEditRef = useRef(canEdit);
   canEditRef.current = canEdit;
 
-  const state = useRef({ subscribed: false, isLeader: false });
+  const state = useRef({ subscribed: false });
   const lastVersions = useRef(new Map<string, number>());
   const knownFiles = useRef(new Set<string>());
   const collaborators = useRef(new Map<string, unknown>());
@@ -56,7 +55,7 @@ export function useBoardLiveSync(params: {
 
   useEffect(() => {
     if (!boardId) return;
-    state.current = { subscribed: false, isLeader: false };
+    state.current = { subscribed: false };
     lastVersions.current = new Map();
     knownFiles.current = new Set();
     collaborators.current = new Map();
@@ -103,15 +102,11 @@ export function useBoardLiveSync(params: {
     const onCursorGone = (msg: BoardCursorGoneMessage) => {
       if (msg.boardId === boardId && collaborators.current.delete(msg.socketId)) applyCollaborators();
     };
-    const onRole = (msg: BoardRoleMessage) => {
-      if (msg.boardId === boardId) state.current.isLeader = Boolean(msg.isLeader);
-    };
 
     socket.on("board:update", onUpdate);
     socket.on("board:files", onFiles);
     socket.on("board:cursor", onCursor);
     socket.on("board:cursor-gone", onCursorGone);
-    socket.on("board:role", onRole);
     socket.on("connect", subscribe);
     if (socket.connected) subscribe();
 
@@ -121,13 +116,12 @@ export function useBoardLiveSync(params: {
       socket.off("board:files", onFiles);
       socket.off("board:cursor", onCursor);
       socket.off("board:cursor-gone", onCursorGone);
-      socket.off("board:role", onRole);
       socket.off("connect", subscribe);
       if (sceneTimer.current) clearTimeout(sceneTimer.current);
       if (cursorTimer.current) clearTimeout(cursorTimer.current);
       sceneTimer.current = cursorTimer.current = null;
       pendingScene.current = pendingCursor.current = null;
-      state.current = { subscribed: false, isLeader: false };
+      state.current = { subscribed: false };
     };
   }, [workspaceId, boardId]);
 
@@ -186,7 +180,5 @@ export function useBoardLiveSync(params: {
       pendingCursor.current = { x, y, selectedIds };
       if (!cursorTimer.current) cursorTimer.current = setTimeout(flushCursor, 60);
     },
-    /** Persist only when we're the leader — or when live sync isn't active (solo/offline). */
-    shouldPersist: () => !state.current.subscribed || state.current.isLeader,
   };
 }

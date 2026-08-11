@@ -63,9 +63,17 @@ async function main(): Promise<void> {
     prisma,
   );
 
+  const viewer = await createGoogleUser(
+    { googleId: "g-viewer", email: "viewer@example.com", name: "Viewer", avatarUrl: null },
+    prisma,
+  );
+
   const ws = await createWorkspace(prisma, owner.id, "Team");
   await prisma.workspaceMember.create({
     data: { workspaceId: ws.id, userId: member.id, role: "EDITOR" },
+  });
+  await prisma.workspaceMember.create({
+    data: { workspaceId: ws.id, userId: viewer.id, role: "VIEWER" },
   });
   const board = await createBoard(prisma, ws.id, "Slide 1");
 
@@ -75,6 +83,7 @@ async function main(): Promise<void> {
   };
   const ownerCookie = await cookieFor(owner.id);
   const memberCookie = await cookieFor(member.id);
+  const viewerCookie = await cookieFor(viewer.id);
   const strangerCookie = await cookieFor(stranger.id);
 
   const server = app.listen(0);
@@ -88,6 +97,14 @@ async function main(): Promise<void> {
       | { success: boolean; data?: unknown; error?: { code?: string } }
       | null;
     return { status: res.status, body };
+  };
+  const putScene = async (cookie: string) => {
+    const res = await fetch(`${base}/workspaces/${ws.id}/boards/${board.id}/scene`, {
+      method: "PUT",
+      headers: { cookie, "content-type": "application/json" },
+      body: JSON.stringify({ baseRevision: 0, elements: [], appState: {}, files: {} }),
+    });
+    return { status: res.status };
   };
 
   try {
@@ -107,6 +124,11 @@ async function main(): Promise<void> {
       "member GET /documents is not the owner-guard 403 (reaches documents router)",
       !(md.status === 403 && md.body?.error?.code === "FORBIDDEN"),
     );
+
+    console.log("\nEditors save their own edits; viewers read but cannot save:");
+    check("member (EDITOR) PUT /scene is 200", (await putScene(memberCookie)).status === 200);
+    check("viewer GET /boards is 200 (can read)", (await get(`/workspaces/${ws.id}/boards`, viewerCookie)).status === 200);
+    check("viewer PUT /scene is 403 (cannot edit)", (await putScene(viewerCookie)).status === 403);
 
     console.log("\nOwner-only surfaces stay owner-only:");
     check("owner GET /members is 200", (await get(`/workspaces/${ws.id}/members`, ownerCookie)).status === 200);

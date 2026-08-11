@@ -108,9 +108,3 @@ export interface BoardCursorGoneMessage {
   boardId: string;
   socketId: string;
 }
-
-/** Server -> client: whether this socket is the board's save leader. */
-export interface BoardRoleMessage {
-  boardId: string;
-  isLeader: boolean;
-}

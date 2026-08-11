@@ -96,6 +96,46 @@ async function main(): Promise<void> {
     JSON.stringify(full.files) === JSON.stringify(files),
   );
 
+  console.log("\nConcurrent saves MERGE by element version (no lost work, no conflict):");
+  const mboard = await createBoard(prisma, ws.id, "Merge");
+  const v = (id: string, version: number, extra: Record<string, unknown> = {}) => ({
+    id,
+    type: "rectangle",
+    version,
+    versionNonce: 1,
+    ...extra,
+  });
+  const idsOf = (b: { elements: unknown }) =>
+    (b.elements as { id: string }[]).map((e) => e.id).sort();
+  const elOf = (b: { elements: unknown }, id: string) =>
+    (b.elements as { id: string; version: number; text?: string; isDeleted?: boolean }[]).find(
+      (e) => e.id === id,
+    );
+
+  // Two editors save disjoint element sets against the same board (A,B) then (A,C).
+  await saveScene(prisma, ws.id, mboard.id, [v("A", 1), v("B", 1)], {});
+  await saveScene(prisma, ws.id, mboard.id, [v("A", 1), v("C", 1)], {});
+  check(
+    "disjoint edits from two savers both survive (A,B,C)",
+    JSON.stringify(idsOf(await getBoard(prisma, ws.id, mboard.id))) === JSON.stringify(["A", "B", "C"]),
+  );
+
+  // Higher version wins for a shared element; the others are untouched.
+  await saveScene(prisma, ws.id, mboard.id, [v("A", 5, { text: "newer" })], {});
+  const afterUpdate = await getBoard(prisma, ws.id, mboard.id);
+  check("higher version wins for A", elOf(afterUpdate, "A")?.version === 5 && elOf(afterUpdate, "A")?.text === "newer");
+  check("B and C survive A's update", Boolean(elOf(afterUpdate, "B")) && Boolean(elOf(afterUpdate, "C")));
+
+  // A stale (lower-version) save must not downgrade the element.
+  await saveScene(prisma, ws.id, mboard.id, [v("A", 2, { text: "stale" })], {});
+  const afterStale = await getBoard(prisma, ws.id, mboard.id);
+  check("stale save does not downgrade A", elOf(afterStale, "A")?.version === 5 && elOf(afterStale, "A")?.text === "newer");
+
+  // Deletion propagates as a tombstone that survives the merge.
+  await saveScene(prisma, ws.id, mboard.id, [v("B", 9, { isDeleted: true })], {});
+  check("deletion tombstone survives merge", elOf(await getBoard(prisma, ws.id, mboard.id), "B")?.isDeleted === true);
+  await deleteBoard(prisma, ws.id, mboard.id);
+
   console.log("\nRename:");
   const renamed = await renameBoard(prisma, ws.id, board.id, "Plan B");
   check("rename succeeds", renamed.name === "Plan B");

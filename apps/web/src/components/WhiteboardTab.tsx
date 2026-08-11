@@ -597,19 +597,18 @@ function BoardCanvas({ workspaceId, boardId, canEdit, focus, onFocusHandled }: B
           const count = Object.keys(appState.selectedElementIds ?? {}).length;
           setSelectedCount((prev) => (prev === count ? prev : count));
           if (!primed.current) return; // ignore the initial restore emit
-          // Broadcast the change to peers (fast, ephemeral)...
+          // Broadcast to peers (fast, ephemeral) AND persist our own edits. Every
+          // editor persists; the server merges by element version, so concurrent
+          // saves converge with no lost work and no conflict dialog.
           live.broadcastScene(
             elements as readonly never[],
             (files ?? {}) as Record<string, unknown>,
           );
-          // ...and persist only if we're the save leader (or offline/solo).
-          if (live.shouldPersist()) {
-            saver.schedule({
-              elements: elements as readonly unknown[],
-              appState: sanitizeAppState(appState as unknown as Record<string, unknown>),
-              files: (files ?? {}) as Record<string, unknown>,
-            });
-          }
+          saver.schedule({
+            elements: elements as readonly unknown[],
+            appState: sanitizeAppState(appState as unknown as Record<string, unknown>),
+            files: (files ?? {}) as Record<string, unknown>,
+          });
         }}
         onPointerUpdate={(payload) => {
           const selected = apiRef.current?.getAppState().selectedElementIds ?? {};

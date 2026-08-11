@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { getSceneVersion } from "@excalidraw/excalidraw";
+import type { BoardDto } from "@plane-and-curves/shared";
 import { SceneSaver, type SaveStatus, type Scene } from "./sceneSaver.js";
-import { saveBoardScene } from "./boards.js";
+import { boardKey, saveBoardScene } from "./boards.js";
 import { ApiClientError } from "./api.js";
 
 /**
@@ -12,12 +14,28 @@ import { ApiClientError } from "./api.js";
 export function useSceneSaver(workspaceId: string, boardId: string | null) {
   const [status, setStatus] = useState<SaveStatus>("idle");
   const saverRef = useRef<SceneSaver | null>(null);
+  const queryClient = useQueryClient();
 
   useEffect(() => {
     if (!boardId) return;
     const saver = new SceneSaver({
-      save: (scene, baseRevision, force) =>
-        saveBoardScene(workspaceId, boardId, { ...scene, baseRevision, force }),
+      save: async (scene, baseRevision, force) => {
+        const summary = await saveBoardScene(workspaceId, boardId, { ...scene, baseRevision, force });
+        // Keep the board's cached scene current so remounting after a tab/slide
+        // switch shows the just-saved scene, not the stale pre-edit one.
+        queryClient.setQueryData<BoardDto>(boardKey(workspaceId, boardId), (prev) =>
+          prev
+            ? {
+                ...prev,
+                elements: scene.elements as BoardDto["elements"],
+                appState: scene.appState as BoardDto["appState"],
+                files: (scene.files ?? {}) as BoardDto["files"],
+                revision: summary.revision,
+              }
+            : prev,
+        );
+        return summary;
+      },
       versionOf: (elements) =>
         getSceneVersion(elements as Parameters<typeof getSceneVersion>[0]),
       onStatusChange: setStatus,
@@ -28,7 +46,7 @@ export function useSceneSaver(workspaceId: string, boardId: string | null) {
       void saver.flushNow().finally(() => saver.dispose());
       saverRef.current = null;
     };
-  }, [workspaceId, boardId]);
+  }, [workspaceId, boardId, queryClient]);
 
   return {
     status,

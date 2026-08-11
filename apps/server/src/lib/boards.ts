@@ -1,5 +1,5 @@
 import type { Board, Prisma, PrismaClient } from "@prisma/client";
-import type { BoardDto, BoardSummaryDto } from "@plane-and-curves/shared";
+import { reconcileElements, type BoardDto, type BoardSummaryDto, type Versioned } from "@plane-and-curves/shared";
 import { AppError } from "../errors.js";
 
 const boardNotFound = () => new AppError(404, "BOARD_NOT_FOUND", "Board not found");
@@ -167,6 +167,19 @@ export async function renameBoard(
  * or field-picking. Scoped to the workspace; 404 if the board is gone (e.g. it
  * was deleted while a save was in flight).
  */
+const asVersioned = (value: unknown): Versioned[] =>
+  Array.isArray(value) ? (value.filter((e) => e && typeof (e as Versioned).id === "string") as Versioned[]) : [];
+
+/**
+ * Persist a scene by MERGING the incoming elements into what's stored, using the
+ * same element-level rule (`version`/`versionNonce`) the live plane uses. This
+ * makes concurrent saves from multiple editors converge with no lost elements
+ * and no conflict — so every editor can persist its own edits safely, rather
+ * than routing all writes through a single "leader". `baseRevision`/`force` are
+ * accepted for wire compatibility but no longer gate the write (merge is always
+ * safe and order-independent). Runs in a transaction so the read-merge-write is
+ * atomic against other concurrent saves.
+ */
 export async function saveScene(
   db: PrismaClient,
   workspaceId: string,
@@ -174,28 +187,34 @@ export async function saveScene(
   elements: unknown[],
   appState: Record<string, unknown>,
   files: Record<string, unknown> = {},
-  baseRevision = 0,
-  force = false,
+  _baseRevision = 0,
+  _force = false,
 ): Promise<BoardSummaryDto> {
-  const result = await db.board.updateMany({
-    where: { id: boardId, workspaceId, ...(force ? {} : { revision: baseRevision }) },
-    data: {
-      elements: elements as Json,
-      appState: appState as Json,
-      files: files as Json,
-      revision: { increment: 1 },
-    },
+  return db.$transaction(async (tx) => {
+    const stored = await tx.board.findFirst({
+      where: { id: boardId, workspaceId },
+      select: { elements: true, files: true },
+    });
+    if (!stored) throw boardNotFound();
+
+    const merged = reconcileElements(asVersioned(stored.elements), asVersioned(elements));
+    const mergedFiles = {
+      ...((stored.files as Record<string, unknown> | null) ?? {}),
+      ...(files ?? {}),
+    };
+
+    const board = await tx.board.update({
+      where: { id: boardId },
+      data: {
+        elements: merged as unknown as Json,
+        appState: appState as Json,
+        files: mergedFiles as Json,
+        revision: { increment: 1 },
+      },
+      select: { id: true, name: true, order: true, updatedAt: true, revision: true },
+    });
+    return toBoardSummaryDto(board);
   });
-  if (result.count === 0) {
-    const exists = await db.board.count({ where: { id: boardId, workspaceId } });
-    if (!exists) throw boardNotFound();
-    throw new AppError(409, "BOARD_CONFLICT", "Another collaborator saved a newer board version");
-  }
-  const board = await db.board.findFirstOrThrow({
-    where: { id: boardId, workspaceId },
-    select: { id: true, name: true, order: true, updatedAt: true, revision: true },
-  });
-  return toBoardSummaryDto(board);
 }
 
 /**
