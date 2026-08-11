@@ -140,7 +140,11 @@ async function start(): Promise<void> {
   });
 }
 
-void start().catch((error: unknown) => {
-  logger.fatal({ err: error }, "Server failed to start");
-  process.exitCode = 1;
-});
+// Skipped only when a test imports `app` to drive it directly (it starts its own
+// listener). Production and E2E both leave this unset, so the server starts.
+if (process.env.SKIP_SERVER_START !== "true") {
+  void start().catch((error: unknown) => {
+    logger.fatal({ err: error }, "Server failed to start");
+    process.exitCode = 1;
+  });
+}
