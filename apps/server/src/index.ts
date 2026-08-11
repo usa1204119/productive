@@ -52,7 +52,14 @@ app.use(
   }),
 );
 app.use(securityHeaders, permissionsPolicy);
-app.use(cors({ origin: env.WEB_URL, credentials: true }));
+// Allow both the web and server origins (they coincide under single-origin
+// prod). Matches the socket CORS and protectUnsafeRequests allowlists.
+app.use(
+  cors({
+    origin: [...new Set([new URL(env.WEB_URL).origin, new URL(env.SERVER_URL).origin])],
+    credentials: true,
+  }),
+);
 app.use(protectUnsafeRequests);
 app.use(express.json({ limit: "25mb" }));
 app.use(cookieParser());

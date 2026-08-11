@@ -25,6 +25,7 @@ import {
   MoreHorizontal,
   Pencil,
   Plus,
+  RefreshCw,
   Trash2,
   TriangleAlert,
 } from "lucide-react";
@@ -60,7 +61,8 @@ interface WhiteboardTabProps {
 
 /** Whiteboard tab: a left slide rail + the Excalidraw canvas. */
 export function WhiteboardTab({ workspace, focus, onFocusHandled }: WhiteboardTabProps) {
-  const { data: boards = [], isLoading } = useBoards(workspace.id);
+  const boardsQuery = useBoards(workspace.id);
+  const { data: boards = [], isLoading, isError, isFetching } = boardsQuery;
   const create = useCreateBoard(workspace.id);
   const [boardId, setBoardId] = useState<string | null>(null);
   const canEdit = workspace.currentRole !== "VIEWER";
@@ -117,7 +119,24 @@ export function WhiteboardTab({ workspace, focus, onFocusHandled }: WhiteboardTa
         onDeleted={onDeleted}
       />
       <div className="relative min-w-0 flex-1">
-        {boards.length === 0 ? (
+        {isError ? (
+          <FullMessage>
+            <div className="text-center">
+              <p className="text-sm text-slate-600">Couldn't load slides.</p>
+              <p className="mt-1 text-xs text-slate-400">
+                The server may have been waking up. This usually clears on retry.
+              </p>
+              <button
+                onClick={() => void boardsQuery.refetch()}
+                disabled={isFetching}
+                className="mt-3 inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:opacity-60"
+              >
+                <RefreshCw className={`h-4 w-4 ${isFetching ? "animate-spin" : ""}`} />
+                {isFetching ? "Retrying…" : "Retry"}
+              </button>
+            </div>
+          </FullMessage>
+        ) : boards.length === 0 ? (
           <FullMessage>
             <div className="text-center">
               <p className="text-sm text-slate-500">No slides yet.</p>

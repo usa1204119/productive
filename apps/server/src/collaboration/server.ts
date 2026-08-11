@@ -54,9 +54,16 @@ function removePresence(io: SocketServer, socket: Socket): void {
 }
 
 export async function createCollaborationServer(httpServer: HttpServer): Promise<SocketServer> {
+  // Allow both the web origin and the server's own origin. Under single-origin
+  // production these can coincide, but if WEB_URL drifts (stale localhost, http
+  // vs https, trailing slash) an origin-only allowlist silently rejects EVERY
+  // socket handshake — killing presence and live updates — while plain HTTP
+  // (same-origin, CORS-exempt) keeps working. Accepting both keeps the socket
+  // alive as long as either env var matches the browser's real origin.
+  const allowedOrigins = [...new Set([new URL(env.WEB_URL).origin, new URL(env.SERVER_URL).origin])];
   const io = new SocketServer(httpServer, {
     path: "/socket.io",
-    cors: { origin: env.WEB_URL, credentials: true },
+    cors: { origin: allowedOrigins, credentials: true },
     maxHttpBufferSize: 64 * 1024,
     transports: ["websocket", "polling"],
   });

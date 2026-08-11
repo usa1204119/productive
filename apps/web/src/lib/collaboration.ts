@@ -12,7 +12,14 @@ export function useWorkspaceCollaboration(workspaceId: string | undefined, activ
 
   useEffect(() => {
     if (!workspaceId) return;
-    const onConnect = () => socket.emit("workspace:join", { workspaceId, activeSection });
+    const onConnect = () => {
+      socket.emit("workspace:join", { workspaceId, activeSection });
+      // A (re)connect may have missed events while we were offline — re-sync the
+      // workspace's lists so a client that loaded stale content self-heals.
+      void queryClient.invalidateQueries({ queryKey: ["boards", workspaceId] });
+      void queryClient.invalidateQueries({ queryKey: ["tasks", workspaceId] });
+      void queryClient.invalidateQueries({ queryKey: ["documents", workspaceId] });
+    };
     const onPresence = (entries: PresenceEntry[]) => setPresence(entries);
     const onEvent = (event: WorkspaceEvent) => {
       if (event.workspaceId !== workspaceId) return;
