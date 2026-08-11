@@ -96,7 +96,14 @@ async function start(): Promise<void> {
   }
 
   const httpServer = createServer(app);
-  const io = await createCollaborationServer(httpServer);
+  // Live sync is best-effort: if it can't initialise, the server must still come
+  // up (HTTP is what the health check probes), so never let it block startup.
+  let io: Awaited<ReturnType<typeof createCollaborationServer>> | null = null;
+  try {
+    io = await createCollaborationServer(httpServer);
+  } catch (error) {
+    logger.error({ err: error }, "Collaboration server failed to start; continuing without live sync");
+  }
   startDriveAclWorker();
   let shuttingDown = false;
 
@@ -111,7 +118,7 @@ async function start(): Promise<void> {
     }, 25_000);
     forceTimer.unref();
 
-    await closeCollaborationServer(io);
+    if (io) await closeCollaborationServer(io);
     await new Promise<void>((resolve, reject) =>
       httpServer.close((error) => (error ? reject(error) : resolve())),
     );

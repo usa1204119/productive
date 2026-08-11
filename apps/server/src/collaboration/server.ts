@@ -126,11 +126,20 @@ export async function createCollaborationServer(httpServer: HttpServer): Promise
     try {
       pubClient = createClient({ url: env.REDIS_URL });
       subClient = pubClient.duplicate();
-      await Promise.all([pubClient.connect(), subClient.connect()]);
+      // Time-box the connect: an unreachable Redis must NOT hang startup, or the
+      // server never reaches listen() and the deploy health check times out.
+      // A single instance is correct with the in-memory adapter, so falling back
+      // is safe. (Mirrors the guard in middleware/rateLimit.ts.)
+      await Promise.race([
+        Promise.all([pubClient.connect(), subClient.connect()]),
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error("Redis connect timeout")), 5_000),
+        ),
+      ]);
       io.adapter(createAdapter(pubClient, subClient));
     } catch (error) {
       logger.error({ err: error }, "Redis collaboration adapter unavailable; using in-memory adapter");
-      await Promise.allSettled([pubClient?.quit(), subClient?.quit()]);
+      await Promise.allSettled([pubClient?.disconnect(), subClient?.disconnect()]);
       pubClient = null;
       subClient = null;
     }
