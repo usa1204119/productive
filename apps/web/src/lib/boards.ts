@@ -17,6 +17,11 @@ export function useBoard(workspaceId: string, boardId: string | null) {
     queryKey: boardKey(workspaceId, boardId ?? "none"),
     queryFn: () => api<BoardDto>(`/workspaces/${workspaceId}/boards/${boardId}`),
     enabled: Boolean(boardId),
+    // Remounting a slide (or returning to one) must not immediately refetch and
+    // overwrite the locally-cached scene, which can still hold edits that a slow
+    // save hasn't persisted yet. Live socket events + explicit invalidation keep
+    // it fresh when it actually changes.
+    staleTime: 30_000,
   });
 }
 

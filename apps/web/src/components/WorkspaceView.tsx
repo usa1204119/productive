@@ -38,25 +38,40 @@ export function WorkspaceView({ workspace, user }: { workspace: WorkspaceDto; us
       aria-label={`${workspace.name} — ${tab}`}
       className="h-full min-h-0"
     >
-      <ErrorBoundary>
-        <Suspense
-          fallback={
-            <div className="flex h-full items-center justify-center text-sm text-slate-400">
-              Loading…
-            </div>
-          }
-        >
-          {tab === "whiteboard" && (
+      {/*
+        The whiteboard stays MOUNTED across tab switches (only hidden) so Excalidraw
+        keeps its in-progress scene. Unmounting it on every tab change re-seeds the
+        canvas from a possibly-stale query cache (initialData is read once at mount),
+        which is what dropped unsaved edits when leaving and returning to the tab.
+        Its own ErrorBoundary/Suspense isolate its (lazy) load and any crash from
+        Tasks/Documents.
+      */}
+      <div hidden={tab !== "whiteboard"} className="h-full min-h-0">
+        <ErrorBoundary>
+          <Suspense fallback={<PanelLoading />}>
             <WhiteboardTab
               workspace={workspace}
+              active={tab === "whiteboard"}
               focus={focus}
               onFocusHandled={() => setFocus(null)}
             />
-          )}
-          {tab === "tasks" && <TasksTab workspace={workspace} onViewOnBoard={viewOnBoard} />}
-          {tab === "documents" && <DocumentsTab workspace={workspace} user={user} />}
-        </Suspense>
-      </ErrorBoundary>
+          </Suspense>
+        </ErrorBoundary>
+      </div>
+      {tab !== "whiteboard" && (
+        <ErrorBoundary>
+          <Suspense fallback={<PanelLoading />}>
+            {tab === "tasks" && <TasksTab workspace={workspace} onViewOnBoard={viewOnBoard} />}
+            {tab === "documents" && <DocumentsTab workspace={workspace} user={user} />}
+          </Suspense>
+        </ErrorBoundary>
+      )}
     </div>
+  );
+}
+
+function PanelLoading() {
+  return (
+    <div className="flex h-full items-center justify-center text-sm text-slate-400">Loading…</div>
   );
 }

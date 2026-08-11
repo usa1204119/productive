@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type ComponentProps } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { Excalidraw } from "@excalidraw/excalidraw";
 import {
   DndContext,
@@ -29,8 +30,9 @@ import {
   Trash2,
   TriangleAlert,
 } from "lucide-react";
-import type { BoardElementInput, BoardSummaryDto, BridgeResultDto, WorkspaceDto } from "@plane-and-curves/shared";
+import type { BoardDto, BoardElementInput, BoardSummaryDto, BridgeResultDto, WorkspaceDto } from "@plane-and-curves/shared";
 import {
+  boardKey,
   useBoard,
   useBoards,
   useCreateBoard,
@@ -56,12 +58,14 @@ type ExcalidrawAPI = Parameters<
 
 interface WhiteboardTabProps {
   workspace: WorkspaceDto;
+  /** Whether the whiteboard tab is the visible one (it stays mounted when not). */
+  active?: boolean;
   focus?: BoardFocusRequest | null;
   onFocusHandled?: () => void;
 }
 
 /** Whiteboard tab: a left slide rail + the Excalidraw canvas. */
-export function WhiteboardTab({ workspace, focus, onFocusHandled }: WhiteboardTabProps) {
+export function WhiteboardTab({ workspace, active = true, focus, onFocusHandled }: WhiteboardTabProps) {
   const boardsQuery = useBoards(workspace.id);
   const { data: boards = [], isLoading, isError, isFetching } = boardsQuery;
   const create = useCreateBoard(workspace.id);
@@ -159,6 +163,7 @@ export function WhiteboardTab({ workspace, focus, onFocusHandled }: WhiteboardTa
             workspaceId={workspace.id}
             boardId={boardId}
             canEdit={canEdit}
+            active={active}
             focus={focus && focus.boardId === boardId ? focus : null}
             onFocusHandled={onFocusHandled}
           />
@@ -462,12 +467,20 @@ interface BoardCanvasProps {
   workspaceId: string;
   boardId: string;
   canEdit: boolean;
+  active: boolean;
   focus: BoardFocusRequest | null;
   onFocusHandled?: () => void;
 }
 
-function BoardCanvas({ workspaceId, boardId, canEdit, focus, onFocusHandled }: BoardCanvasProps) {
+function BoardCanvas({ workspaceId, boardId, canEdit, active, focus, onFocusHandled }: BoardCanvasProps) {
   const { data: board, isLoading, isError, refetch } = useBoard(workspaceId, boardId);
+  const queryClient = useQueryClient();
+  const cacheTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pendingScene = useRef<{
+    elements: readonly unknown[];
+    appState: Record<string, unknown>;
+    files: Record<string, unknown>;
+  } | null>(null);
   const saver = useSceneSaver(workspaceId, boardId);
   const addToTasks = useCreateTasksFromSelection(workspaceId);
   const apiRef = useRef<ExcalidrawAPI | null>(null);
@@ -492,6 +505,17 @@ function BoardCanvas({ workspaceId, boardId, canEdit, focus, onFocusHandled }: B
       primed.current = true;
     }
   }, [board, saver, live]);
+
+  // Excalidraw measures its container; when the whiteboard becomes visible again
+  // after being hidden (tab switch), nudge it to re-fit to the now-sized canvas.
+  useEffect(() => {
+    if (active) apiRef.current?.refresh();
+  }, [active]);
+
+  // Flush the pending cache write on unmount so nothing is left dangling.
+  useEffect(() => () => {
+    if (cacheTimer.current) clearTimeout(cacheTimer.current);
+  }, []);
 
   useEffect(() => {
     if (!toast) return;
@@ -597,6 +621,11 @@ function BoardCanvas({ workspaceId, boardId, canEdit, focus, onFocusHandled }: B
           const count = Object.keys(appState.selectedElementIds ?? {}).length;
           setSelectedCount((prev) => (prev === count ? prev : count));
           if (!primed.current) return; // ignore the initial restore emit
+          const scene = {
+            elements: elements as readonly unknown[],
+            appState: sanitizeAppState(appState as unknown as Record<string, unknown>),
+            files: (files ?? {}) as Record<string, unknown>,
+          };
           // Broadcast to peers (fast, ephemeral) AND persist our own edits. Every
           // editor persists; the server merges by element version, so concurrent
           // saves converge with no lost work and no conflict dialog.
@@ -604,11 +633,30 @@ function BoardCanvas({ workspaceId, boardId, canEdit, focus, onFocusHandled }: B
             elements as readonly never[],
             (files ?? {}) as Record<string, unknown>,
           );
-          saver.schedule({
-            elements: elements as readonly unknown[],
-            appState: sanitizeAppState(appState as unknown as Record<string, unknown>),
-            files: (files ?? {}) as Record<string, unknown>,
-          });
+          saver.schedule(scene);
+          // Keep the board's query cache current with the latest EDIT (throttled,
+          // trailing), independent of the async/debounced save — so remounting this
+          // slide (or a reload) seeds Excalidraw from the live scene, never a stale
+          // one.
+          pendingScene.current = scene;
+          if (!cacheTimer.current) {
+            cacheTimer.current = setTimeout(() => {
+              cacheTimer.current = null;
+              const p = pendingScene.current;
+              pendingScene.current = null;
+              if (!p) return;
+              queryClient.setQueryData<BoardDto>(boardKey(workspaceId, boardId), (prev) =>
+                prev
+                  ? {
+                      ...prev,
+                      elements: p.elements as BoardDto["elements"],
+                      appState: p.appState as BoardDto["appState"],
+                      files: p.files as BoardDto["files"],
+                    }
+                  : prev,
+              );
+            }, 300);
+          }
         }}
         onPointerUpdate={(payload) => {
           const selected = apiRef.current?.getAppState().selectedElementIds ?? {};
