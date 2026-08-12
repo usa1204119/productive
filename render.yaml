@@ -53,3 +53,11 @@ services:
         value: "168"
       - key: REDIS_URL
         sync: false
+      # AI chat ("Ask AI"): enabled automatically once GROQ_API_KEY is set (fill it
+      # in the dashboard). Model/reasoning have working code defaults.
+      - key: GROQ_API_KEY
+        sync: false
+      - key: GROQ_MODEL
+        value: qwen/qwen3.6-27b
+      - key: GROQ_REASONING_EFFORT
+        value: none

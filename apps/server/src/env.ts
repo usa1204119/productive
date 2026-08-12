@@ -39,8 +39,9 @@ const envSchema = z.object({
   E2E_TEST_MODE: booleanString.default("false"),
 
   // AI chat ("Ask AI" about a whiteboard selection) — Groq vision. The key stays
-  // server-side; the browser never sees it.
-  AI_CHAT_ENABLED: booleanString.default("false"),
+  // server-side; the browser never sees it. AI is enabled automatically when a
+  // GROQ_API_KEY is present; set AI_CHAT_ENABLED=false to force it off.
+  AI_CHAT_ENABLED: booleanString.optional(),
   GROQ_API_KEY: z.string().min(1).optional(),
   GROQ_MODEL: z.string().min(1).default("qwen/qwen3.6-27b"),
   GROQ_BASE_URL: z.string().url().default("https://api.groq.com/openai/v1"),
@@ -70,7 +71,7 @@ const envSchema = z.object({
       message: "may only be enabled when NODE_ENV=test",
     });
   }
-  if (value.NODE_ENV === "production" && value.AI_CHAT_ENABLED && !value.GROQ_API_KEY) {
+  if (value.NODE_ENV === "production" && value.AI_CHAT_ENABLED === true && !value.GROQ_API_KEY) {
     ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["GROQ_API_KEY"], message: "required when AI_CHAT_ENABLED" });
   }
 });
@@ -88,3 +89,6 @@ if (!parsed.success) {
 
 export const env = parsed.data;
 export const isProd = env.NODE_ENV === "production";
+
+/** AI chat is on when explicitly enabled, or (by default) whenever a key exists. */
+export const aiChatEnabled = env.AI_CHAT_ENABLED ?? Boolean(env.GROQ_API_KEY);

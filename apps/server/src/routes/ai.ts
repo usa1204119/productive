@@ -4,7 +4,7 @@ import { requireAuth } from "../middleware/auth.js";
 import { requireWorkspaceAccess } from "../middleware/workspace.js";
 import { validateBody } from "../middleware/validate.js";
 import { aiRateLimit } from "../middleware/rateLimit.js";
-import { env } from "../env.js";
+import { aiChatEnabled, env } from "../env.js";
 import { logger } from "../logger.js";
 import { aiProvider } from "../lib/ai/index.js";
 import { AiProviderError, type AiProviderMessage } from "../lib/ai/groq.js";
@@ -27,7 +27,7 @@ const SYSTEM_PROMPT =
  * {message}. The GROQ key never leaves the server.
  */
 aiRouter.post("/chat", aiRateLimit, validateBody(aiChatRequestSchema), async (req, res) => {
-  if (!env.AI_CHAT_ENABLED) {
+  if (!aiChatEnabled) {
     res.status(503).json({ success: false, error: { code: "AI_DISABLED", message: "AI chat is not enabled" } });
     return;
   }
