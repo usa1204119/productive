@@ -13,6 +13,7 @@ import { workspacesRouter } from "./routes/workspaces.js";
 import { boardsRouter } from "./routes/boards.js";
 import { tasksRouter } from "./routes/tasks.js";
 import { documentsRouter } from "./routes/documents.js";
+import { aiRouter } from "./routes/ai.js";
 import { membersRouter } from "./routes/members.js";
 import { invitationsRouter } from "./routes/invitations.js";
 import { errorHandler, notFoundHandler } from "./middleware/error.js";
@@ -81,6 +82,7 @@ app.use("/workspaces", workspacesRouter);
 app.use("/workspaces/:workspaceId/boards", boardsRouter);
 app.use("/workspaces/:workspaceId/tasks", tasksRouter);
 app.use("/workspaces/:workspaceId/documents", documentsRouter);
+app.use("/workspaces/:workspaceId/ai", aiRouter);
 app.use("/workspaces/:workspaceId", membersRouter);
 app.use("/workspace-invitations", invitationsRouter);
 

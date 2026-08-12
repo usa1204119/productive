@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ComponentProps } from "react";
+import { lazy, Suspense, useEffect, useRef, useState, type ComponentProps } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Excalidraw } from "@excalidraw/excalidraw";
 import {
@@ -21,16 +21,16 @@ import {
   ChevronLeft,
   ChevronRight,
   GripVertical,
-  ListPlus,
   Loader2,
   MoreHorizontal,
   Pencil,
   Plus,
   RefreshCw,
+  Sparkles,
   Trash2,
   TriangleAlert,
 } from "lucide-react";
-import type { BoardDto, BoardElementInput, BoardSummaryDto, BridgeResultDto, WorkspaceDto } from "@plane-and-curves/shared";
+import type { BoardDto, BoardSummaryDto, WorkspaceDto } from "@plane-and-curves/shared";
 import {
   boardKey,
   useBoard,
@@ -42,9 +42,11 @@ import {
 } from "../lib/boards.js";
 import { useSceneSaver } from "../lib/useSceneSaver.js";
 import { useBoardLiveSync } from "../lib/boardSync.js";
-import { useCreateTasksFromSelection } from "../lib/bridge.js";
+import { captureSelectionSnapshot } from "../lib/snapshot.js";
 import type { SaveStatus } from "../lib/sceneSaver.js";
 import { ConfirmDialog } from "./ConfirmDialog.js";
+
+const AiChatPanel = lazy(() => import("./ai/AiChatPanel.js").then((m) => ({ default: m.AiChatPanel })));
 
 /** A request from the Tasks tab to open a slide and focus a specific element. */
 export interface BoardFocusRequest {
@@ -161,6 +163,7 @@ export function WhiteboardTab({ workspace, active = true, focus, onFocusHandled 
           <BoardCanvas
             key={boardId}
             workspaceId={workspace.id}
+            workspaceName={workspace.name}
             boardId={boardId}
             canEdit={canEdit}
             active={active}
@@ -465,6 +468,7 @@ function SlideRow({
 
 interface BoardCanvasProps {
   workspaceId: string;
+  workspaceName: string;
   boardId: string;
   canEdit: boolean;
   active: boolean;
@@ -472,7 +476,7 @@ interface BoardCanvasProps {
   onFocusHandled?: () => void;
 }
 
-function BoardCanvas({ workspaceId, boardId, canEdit, active, focus, onFocusHandled }: BoardCanvasProps) {
+function BoardCanvas({ workspaceId, workspaceName, boardId, canEdit, active, focus, onFocusHandled }: BoardCanvasProps) {
   const { data: board, isLoading, isError, refetch } = useBoard(workspaceId, boardId);
   const queryClient = useQueryClient();
   const cacheTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -482,7 +486,6 @@ function BoardCanvas({ workspaceId, boardId, canEdit, active, focus, onFocusHand
     files: Record<string, unknown>;
   } | null>(null);
   const saver = useSceneSaver(workspaceId, boardId);
-  const addToTasks = useCreateTasksFromSelection(workspaceId);
   const apiRef = useRef<ExcalidrawAPI | null>(null);
   const live = useBoardLiveSync({
     workspaceId,
@@ -495,6 +498,8 @@ function BoardCanvas({ workspaceId, boardId, canEdit, active, focus, onFocusHand
 
   const [selectedCount, setSelectedCount] = useState(0);
   const [toast, setToast] = useState<{ kind: "ok" | "warn"; text: string } | null>(null);
+  const [askingAi, setAskingAi] = useState(false);
+  const [aiSnapshot, setAiSnapshot] = useState<string | null>(null);
 
   const showToast = (kind: "ok" | "warn", text: string) => setToast({ kind, text });
 
@@ -538,24 +543,19 @@ function BoardCanvas({ workspaceId, boardId, canEdit, active, focus, onFocusHand
     onFocusHandled?.();
   }, [focus, board, onFocusHandled]);
 
-  const onAddToTasks = () => {
-    if (!canEdit) return;
+  const onAskAi = async () => {
     const api = apiRef.current;
-    if (!api) return;
-    const selectedIds = api.getAppState().selectedElementIds;
-    const elements: BoardElementInput[] = api
-      .getSceneElements()
-      .filter((e) => selectedIds[e.id])
-      .map((e) => ({ id: e.id, type: e.type, text: (e as { text?: string }).text ?? null }));
-    if (elements.length === 0) return;
-
-    addToTasks.mutate(
-      { boardId, elements },
-      {
-        onSuccess: (res) => showToast("ok", summarize(res)),
-        onError: () => showToast("warn", "Couldn't add to tasks. Please try again."),
-      },
-    );
+    if (!api || askingAi) return;
+    setAskingAi(true);
+    try {
+      const snapshot = await captureSelectionSnapshot(api as never);
+      if (snapshot) setAiSnapshot(snapshot);
+      else showToast("warn", "Select something on the board first.");
+    } catch {
+      showToast("warn", "Couldn't capture the selection. Please try again.");
+    } finally {
+      setAskingAi(false);
+    }
   };
 
   const reloadLatest = async () => {
@@ -578,19 +578,15 @@ function BoardCanvas({ workspaceId, boardId, canEdit, active, focus, onFocusHand
         <SaveChip status={saver.status} onRetry={saver.retryNow} />
       </div>
 
-      {canEdit && selectedCount > 0 && (
+      {selectedCount > 0 && (
         <div className="absolute bottom-14 left-1/2 z-20 -translate-x-1/2">
           <button
-            onClick={onAddToTasks}
-            disabled={addToTasks.isPending}
+            onClick={() => void onAskAi()}
+            disabled={askingAi}
             className="inline-flex items-center gap-1.5 rounded-full bg-accent px-4 py-2 text-sm font-medium text-white shadow-md transition hover:bg-accent-hover disabled:opacity-60"
           >
-            {addToTasks.isPending ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              <ListPlus className="h-4 w-4" />
-            )}
-            Add to tasks
+            {askingAi ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
+            Ask AI
             <span className="rounded-full bg-white/20 px-1.5 text-xs">{selectedCount}</span>
           </button>
         </div>
@@ -673,6 +669,17 @@ function BoardCanvas({ workspaceId, boardId, canEdit, active, focus, onFocusHand
           onOverwrite={() => void saver.overwriteNow()}
         />
       )}
+
+      {aiSnapshot && (
+        <Suspense fallback={null}>
+          <AiChatPanel
+            workspaceId={workspaceId}
+            workspaceName={workspaceName}
+            snapshot={aiSnapshot}
+            onClose={() => setAiSnapshot(null)}
+          />
+        </Suspense>
+      )}
     </div>
   );
 }
@@ -686,17 +693,6 @@ function sanitizeAppState(appState: Record<string, unknown>): Record<string, unk
   if (!appState || typeof appState !== "object") return {};
   const { collaborators: _collaborators, ...rest } = appState;
   return rest;
-}
-
-function summarize(res: BridgeResultDto): string {
-  const n = res.created.length;
-  if (n === 0) {
-    return res.skipped > 0 ? `No text elements selected (skipped ${res.skipped}).` : "Nothing to add.";
-  }
-  const parts = [`Created ${n} task${n === 1 ? "" : "s"}`];
-  if (res.skipped > 0) parts.push(`skipped ${res.skipped} non-text`);
-  if (res.trimmed > 0) parts.push(`${res.trimmed} trimmed`);
-  return `${parts.join(" · ")}.`;
 }
 
 function SaveChip({ status, onRetry }: { status: SaveStatus; onRetry: () => void }) {

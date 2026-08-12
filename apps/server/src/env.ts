@@ -37,6 +37,16 @@ const envSchema = z.object({
   INVITE_TTL_HOURS: z.coerce.number().int().positive().max(24 * 30).default(168),
   REDIS_URL: z.string().url().optional(),
   E2E_TEST_MODE: booleanString.default("false"),
+
+  // AI chat ("Ask AI" about a whiteboard selection) — Groq vision. The key stays
+  // server-side; the browser never sees it.
+  AI_CHAT_ENABLED: booleanString.default("false"),
+  GROQ_API_KEY: z.string().min(1).optional(),
+  GROQ_MODEL: z.string().min(1).default("qwen/qwen3.6-27b"),
+  GROQ_BASE_URL: z.string().url().default("https://api.groq.com/openai/v1"),
+  // Reasoning models (e.g. Qwen3) otherwise burn the token budget on hidden
+  // <think>; "none" makes them answer directly. Set empty for non-reasoning models.
+  GROQ_REASONING_EFFORT: z.string().default("none"),
 }).superRefine((value, ctx) => {
   if (value.NODE_ENV === "production" && value.SHARING_ENABLED) {
     if (value.MAIL_PROVIDER !== "resend") {
@@ -59,6 +69,9 @@ const envSchema = z.object({
       path: ["E2E_TEST_MODE"],
       message: "may only be enabled when NODE_ENV=test",
     });
+  }
+  if (value.NODE_ENV === "production" && value.AI_CHAT_ENABLED && !value.GROQ_API_KEY) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["GROQ_API_KEY"], message: "required when AI_CHAT_ENABLED" });
   }
 });
 

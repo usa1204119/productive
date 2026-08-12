@@ -62,6 +62,7 @@ export const oauthRateLimit = limiter("oauth", 15 * 60_000, 60);
 export const invitationRateLimit = limiter("invitation", 60 * 60_000, 20);
 export const invitationAcceptRateLimit = limiter("invitation-accept", 60 * 60_000, 30);
 export const uploadRateLimit = limiter("upload", 60 * 60_000, 30);
+export const aiRateLimit = limiter("ai", 5 * 60_000, env.NODE_ENV === "test" ? 5 : 30);
 export const e2eRateLimit = limiter("e2e", 60_000, 3);
 
 export async function closeRateLimitStore(): Promise<void> {
